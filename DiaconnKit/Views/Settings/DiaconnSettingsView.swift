@@ -35,6 +35,15 @@ struct DiaconnSettingsView: View {
                     Text(String(format: "%.0f%%", viewModel.batteryRemaining * 100))
                 }
 
+                if let serial = viewModel.serialNumber {
+                    HStack {
+                        Text("시리얼 번호")
+                        Spacer()
+                        Text(serial)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
                 if let firmware = viewModel.firmwareVersion {
                     HStack {
                         Text("펌웨어")
@@ -54,6 +63,26 @@ struct DiaconnSettingsView: View {
                         Text(LocalizedString("Unknown", comment: "Unknown pump time"))
                             .foregroundColor(.secondary)
                     }
+                }
+
+                Button(action: {
+                    viewModel.refreshStatus()
+                }) {
+                    HStack {
+                        if viewModel.isRefreshing {
+                            ProgressView().scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        Text(viewModel.isRefreshing ? "조회 중..." : "상태 새로고침")
+                    }
+                }
+                .disabled(viewModel.isRefreshing)
+
+                if let errorMessage = viewModel.refreshErrorMessage {
+                    Text(errorMessage)
+                        .foregroundColor(.red)
+                        .font(.footnote)
                 }
             }
 
@@ -85,6 +114,74 @@ struct DiaconnSettingsView: View {
                     Text("기저 상태")
                     Spacer()
                     Text(viewModel.basalStateDescription)
+                }
+
+                HStack {
+                    Text("현재 기저량")
+                    Spacer()
+                    Text(String(format: "%.2f U/h", viewModel.currentBasalRate))
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Text("오늘 주입 총량")
+                    Spacer()
+                    Text(String(format: "%.2f U", viewModel.todayTotalAmount))
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Text("최대 기저")
+                    Spacer()
+                    Text(String(format: "%.2f U/h", viewModel.maxBasalPerHour))
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Text("최대 볼러스")
+                    Spacer()
+                    Text(String(format: "%.1f U", viewModel.maxBolus))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            Section(header: Text("디버그")) {
+                HStack {
+                    Text("펌프 로그")
+                    Spacer()
+                    Text("wrap: \(viewModel.pumpWrapCount) / #\(viewModel.pumpLogNum)")
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Text("저장된 로그")
+                    Spacer()
+                    Text("wrap: \(viewModel.storedWrapCount) / #\(viewModel.storedLogNum)")
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Text("저장 로그 번호 변경")
+                    Spacer()
+                    TextField("logNum", text: $viewModel.editStoredLogNum)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 80)
+                    Button("적용") {
+                        viewModel.applyStoredLogNum()
+                    }
+                }
+
+                HStack {
+                    Text("저장 랩 번호 변경")
+                    Spacer()
+                    TextField("wrap", text: $viewModel.editStoredWrapCount)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 80)
+                    Button("적용") {
+                        viewModel.applyStoredWrapCount()
+                    }
                 }
             }
 
@@ -129,22 +226,6 @@ struct DiaconnSettingsView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-            }
-
-            Section {
-                Button(action: {
-                    viewModel.refreshStatus()
-                }) {
-                    HStack {
-                        if viewModel.isRefreshing {
-                            ProgressView().scaleEffect(0.8)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        Text(viewModel.isRefreshing ? "조회 중..." : "상태 새로고침")
-                    }
-                }
-                .disabled(viewModel.isRefreshing || !viewModel.isConnected)
             }
 
             Section {

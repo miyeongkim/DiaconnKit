@@ -125,7 +125,9 @@ class DiaconnUICoordinator: UINavigationController, PumpManagerOnboarding, Compl
                 onFinish: stepFinished
             )
             let view = DiaconnSettingsView(viewModel: viewModel)
-            return hostingController(rootView: view)
+            let vc = hostingController(rootView: view)
+            vc.title = pumpManager?.localizedTitle ?? "Diaconn G8"
+            return vc
         }
     }
 
