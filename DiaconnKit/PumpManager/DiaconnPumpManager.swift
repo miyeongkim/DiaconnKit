@@ -1400,6 +1400,50 @@ extension DiaconnPumpManager {
         doseReporter = nil
         notifyStateDidChange()
     }
+
+    func notifyBasalSuspended() {
+        state.basalDeliveryOrdinal = .suspended
+        state.basalDeliveryDate = Date()
+        notifyStateDidChange()
+    }
+
+    func notifyAlert(_ alert: DiaconnPumpManagerAlert) {
+        let identifier = Alert.Identifier(managerIdentifier: managerIdentifier, alertIdentifier: alert.identifier)
+        let loopAlert = Alert(
+            identifier: identifier,
+            foregroundContent: alert.foregroundContent,
+            backgroundContent: alert.backgroundContent,
+            trigger: .immediate
+        )
+
+        let events = [NewPumpEvent(
+            date: Date.now,
+            dose: nil,
+            raw: alert.raw,
+            title: "Alarm: \(alert.foregroundContent.title)",
+            type: .alarm,
+            alarmType: alert.type
+        )]
+
+        pumpDelegate.notify { delegate in
+            guard let delegate = delegate else {
+                self.log.error("Alarm could not be reported -> Missing delegate")
+                return
+            }
+
+            delegate.issueAlert(loopAlert)
+            delegate.pumpManager(
+                self,
+                hasNewPumpEvents: events,
+                lastReconciliation: self.state.lastStatusDate,
+                replacePendingEvents: false
+            ) { error in
+                if let error = error {
+                    self.log.error("Failed to report pump alarm event: \(error)")
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Deactivation

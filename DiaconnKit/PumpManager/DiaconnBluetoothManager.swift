@@ -138,6 +138,7 @@ public class DiaconnBluetoothManager: NSObject {
     private func drainResponseSemaphore() {
         while responseSemaphore.wait(timeout: .now()) == .success {}
         lastResponse = nil
+        readBuffer = Data()
     }
 
     /// 이미 인코딩된 패킷을 전송하고 응답 대기 (이중 전송 방지용)
@@ -492,12 +493,18 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
         case DiaconnPacketType.INJECTION_BLOCK_REPORT:
             log.error("Injection block report (occlusion)")
             pumpManager?.notifyBolusError()
+            pumpManager?.notifyAlert(.occlusion(payload))
 
         case DiaconnPacketType.BASAL_SETTING_REPORT:
             log.info("Basal setting complete report")
 
         case DiaconnPacketType.INSULIN_LACK_REPORT:
             log.error("Insulin lack report")
+            pumpManager?.notifyAlert(.insulinLack(payload))
+
+        case DiaconnPacketType.BASAL_PAUSE_REPORT:
+            log.info("Basal pause report (suspended)")
+            pumpManager?.notifyBasalSuspended()
 
         case DiaconnPacketType.REJECT_REPORT:
             log.error("Reject report")
