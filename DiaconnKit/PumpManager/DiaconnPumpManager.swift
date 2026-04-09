@@ -348,6 +348,9 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
                     delegate.pumpManager(self, didReadReservoirValue: reservoirLevel, at: now) { _ in }
                 }
 
+                // 펌프 로그 조회 후 Trio 히스토리에 저장
+                self.syncLogHistory()
+
                 completion(.success(pumpStatus))
 
             } catch {
@@ -509,10 +512,11 @@ extension DiaconnPumpManager: PumpManager {
 
     public func enactBolus(
         units: Double,
-        activationType _: BolusActivationType,
+        activationType: BolusActivationType,
         completion: @escaping (PumpManagerError?) -> Void
     ) {
-        log.info("enactBolus: \(units)U")
+        log.info("enactBolus: \(units)U activationType=\(activationType)")
+        state.lastBolusAutomatic = (activationType == .automatic)
 
         guard state.isConnected else {
             completion(.communication(DiaconnPumpManagerError.notConnected))
@@ -720,6 +724,7 @@ extension DiaconnPumpManager: PumpManager {
                     self.state.basalDeliveryOrdinal = .tempBasal
                 }
                 self.notifyStateDidChange()
+                self.syncLogHistory()
 
                 completion(nil)
 
@@ -768,6 +773,7 @@ extension DiaconnPumpManager: PumpManager {
                 self.state.basalDeliveryOrdinal = .suspended
                 self.state.basalDeliveryDate = Date()
                 self.notifyStateDidChange()
+                self.syncLogHistory()
 
                 completion(nil)
 
@@ -809,6 +815,7 @@ extension DiaconnPumpManager: PumpManager {
                 self.state.basalDeliveryOrdinal = .active
                 self.state.basalDeliveryDate = Date()
                 self.notifyStateDidChange()
+                self.syncLogHistory()
 
                 completion(nil)
 
@@ -992,17 +999,17 @@ extension DiaconnPumpManager: PumpManager {
 
     // MARK: - 테스트용 로그 직접 조회
 
-    /// 지정한 위치부터 로그를 fetch하고 raw 응답 + 파싱 결과를 반환한다.
+    /// 지정한 범위의 로그를 fetch하고 raw 응답 + 파싱 결과를 반환한다.
     /// 커서 상태는 변경하지 않는 읽기 전용 테스트 도구.
     public func testFetchLogEntries(
-        wrapCount: UInt8,
-        logNum: UInt16,
+        start: UInt16,
+        end: UInt16,
         completion: @escaping (Result<(rawResponse: Data, entries: [DiaconnLogEntry]), Error>) -> Void
     ) {
         pumpQueue.async { [weak self] in
             guard let self = self else { return }
             do {
-                let packet = generateBigLogInquirePacket(wrapCount: wrapCount, logNum: logNum)
+                let packet = generateBigLogInquirePacket(start: start, end: end)
                 guard let responseData = try self.bluetooth.writeAndWait(packet: packet, timeout: 15.0) else {
                     completion(.failure(DiaconnPumpManagerError.communicationFailure))
                     return
@@ -1039,12 +1046,18 @@ extension DiaconnPumpManager: PumpManager {
         let pumpLastLogNum = state.pumpLastLogNum
         let pumpWrapCount = state.pumpWrappingCount
 
-        // 최초 연결: 현재 위치를 기준점으로만 저장하고 빈 배열 반환
+        NSLog(
+            "[DiaconnKit] fetchNewLogEntries: pumpLast=\(pumpLastLogNum) pumpWrap=\(pumpWrapCount) storedLast=\(state.storedLastLogNum) storedWrap=\(state.storedWrappingCount) isFirst=\(state.isFirstLogSync)"
+        )
+
+        // 최초 연결: 현재 위치를 기준점으로 저장
         if state.isFirstLogSync {
-            log.info("First log sync — saving baseline: wrapCount=\(pumpWrapCount) logNum=\(pumpLastLogNum)")
+            let baseline = pumpLastLogNum >= 2 ? pumpLastLogNum - 2 : 0
+            NSLog("[DiaconnKit] First log sync — baseline=\(baseline) wrap=\(pumpWrapCount)")
+            state.storedLastLogNum = baseline
+            state.storedWrappingCount = pumpWrapCount
             state.isFirstLogSync = false
             notifyStateDidChange()
-            return []
         }
 
         // 2. 새 로그가 없으면 skip
@@ -1055,31 +1068,69 @@ extension DiaconnPumpManager: PumpManager {
             return []
         }
 
-        // 3. BIG_LOG_INQUIRE: 마지막 커서 이후부터 요청
-        log.info("Fetching logs from wrapCount=\(state.storedWrappingCount) logNum=\(state.storedLastLogNum + 1)")
-        let packet = generateBigLogInquirePacket(
-            wrapCount: state.storedWrappingCount,
-            logNum: state.storedLastLogNum + 1
+        // 3. BIG_LOG_INQUIRE: 정상 범위만 동기화 (wrap 발생 시 이전 로그 bulk sync 없이 기준점 리셋)
+        let pageSize = 11
+        let pumpLast = Int(pumpLastLogNum)
+        let pumpWrap = Int(pumpWrapCount)
+        let storedLast = Int(state.storedLastLogNum)
+        let storedWrap = Int(state.storedWrappingCount)
+
+        // wrap 발생 시: old wrap 나머지(storedLast+1~9999) 동기화 후 새 wrap 기준으로 리셋
+        let isWrapSync = pumpWrap > storedWrap
+        let startLogNum = storedLast + 1
+        let endLogNum = isWrapSync ? 9999 : pumpLast
+
+        if isWrapSync {
+            NSLog("[DiaconnKit] BIG_LOG_INQUIRE: wrap sync — \(startLogNum)~9999")
+        }
+
+        NSLog(
+            "[DiaconnKit] BIG_LOG_INQUIRE: start=\(startLogNum) end=\(endLogNum) (pumpLast=\(pumpLast) pumpWrap=\(pumpWrap) storedLast=\(storedLast) storedWrap=\(storedWrap))"
         )
 
-        guard let responseData = try bluetooth.writeAndWait(packet: packet, timeout: 15.0) else {
-            throw DiaconnPumpManagerError.communicationFailure
+        // AndroidAPS 공식: size = ceil((end - start) / 11.0)
+        let loopSize = Int(ceil(Double(endLogNum - startLogNum) / Double(pageSize)))
+        guard loopSize > 0 else {
+            NSLog("[DiaconnKit] BIG_LOG_INQUIRE: loopSize=0 — skipping")
+            return []
         }
 
-        guard let entries = parseBigLogInquireResponse(responseData) else {
-            log.error("fetchNewLogEntries: parseBigLogInquireResponse returned nil")
-            throw DiaconnPumpManagerError.communicationFailure
+        var allEntries: [DiaconnLogEntry] = []
+
+        for i in 0 ..< loopSize {
+            let pageStart = startLogNum + i * pageSize
+            let pageEnd = pageStart + min(endLogNum - pageStart, pageSize)
+            NSLog("[DiaconnKit] BIG_LOG_INQUIRE page \(i + 1)/\(loopSize): \(pageStart)~\(pageEnd)")
+
+            let packet = generateBigLogInquirePacket(start: UInt16(pageStart), end: UInt16(pageEnd))
+            guard let responseData = try bluetooth.writeAndWait(packet: packet, timeout: 15.0) else {
+                throw DiaconnPumpManagerError.communicationFailure
+            }
+
+            guard let entries = parseBigLogInquireResponse(responseData) else {
+                log.error("fetchNewLogEntries: parseBigLogInquireResponse returned nil for page \(pageStart)~\(pageEnd)")
+                throw DiaconnPumpManagerError.communicationFailure
+            }
+
+            allEntries.append(contentsOf: entries)
+
+            if let last = entries.last {
+                state.storedLastLogNum = last.logNum
+                // wrapCount는 엔트리별 값이 아닌 펌프 현재 값 사용 (옛날 로그의 wrap이 다를 수 있음)
+                state.storedWrappingCount = pumpWrapCount
+                notifyStateDidChange()
+            }
         }
 
-        // 4. 커서 업데이트
-        if let last = entries.last {
-            state.storedLastLogNum = last.logNum
-            state.storedWrappingCount = last.wrapCount
+        if isWrapSync {
+            state.storedWrappingCount = UInt8(pumpWrap)
+            state.storedLastLogNum = 0
             notifyStateDidChange()
+            NSLog("[DiaconnKit] BIG_LOG_INQUIRE: wrap sync done — reset to wrap=\(pumpWrap) logNum=0")
         }
 
-        log.info("Fetched \(entries.count) new log entries")
-        return entries
+        log.info("Fetched \(allEntries.count) new log entries")
+        return allEntries
     }
 
     /// DiaconnLogEntry 배열을 LoopKit DoseEntry 배열로 변환
@@ -1087,38 +1138,234 @@ extension DiaconnPumpManager: PumpManager {
         entries.compactMap { entry -> DoseEntry? in
             let date = entry.date
             switch entry.logKind {
-            case .mealBolus,
-                 .snackBolus:
+            case .mealBolusFail,
+                 .mealBolusSuccess,
+                 .normalBolusFail,
+                 .normalBolusSuccess:
+                guard entry.injectAmount > 0 else { return nil }
                 return DoseEntry(
                     type: .bolus,
                     startDate: date,
                     endDate: date,
-                    value: entry.amount,
+                    value: entry.injectAmount,
                     unit: .units
                 )
-            case .dualBolus,
-                 .squareBolus:
-                let duration = TimeInterval(entry.durationMin * 60)
+            case .squareBolusFail,
+                 .squareBolusSuccess:
+                guard entry.injectAmount > 0 else { return nil }
+                let sqDur = TimeInterval(entry.injectTimeUnit * 10 * 60)
                 return DoseEntry(
                     type: .bolus,
                     startDate: date,
-                    endDate: date.addingTimeInterval(duration),
-                    value: entry.amount,
+                    endDate: date.addingTimeInterval(sqDur),
+                    value: entry.injectAmount,
                     unit: .units
                 )
-            case .tempBasalStart:
-                let duration = TimeInterval(entry.durationMin * 60)
+            case .dualNormal:
+                guard entry.injectAmount > 0 else { return nil }
+                return DoseEntry(type: .bolus, startDate: date, endDate: date, value: entry.injectAmount, unit: .units)
+            case .dualBolusFail,
+                 .dualBolusSuccess:
+                guard entry.injectAmount > 0 else { return nil }
+                let dualSqDur = TimeInterval(entry.injectTimeUnit * 10 * 60)
+                return DoseEntry(
+                    type: .bolus,
+                    startDate: date,
+                    endDate: date.addingTimeInterval(dualSqDur),
+                    value: entry.injectAmount,
+                    unit: .units
+                )
+            case .tbStart:
+                let duration = TimeInterval(entry.tbTime * 15 * 60)
+                let rate = tbAbsoluteRate(rawRatio: entry.tbRateRatio)
                 return DoseEntry(
                     type: .tempBasal,
                     startDate: date,
                     endDate: date.addingTimeInterval(duration),
-                    value: entry.rate,
+                    value: rate,
                     unit: .unitsPerHour
                 )
             case .suspend:
                 return DoseEntry(type: .suspend, startDate: date, value: 0, unit: .unitsPerHour)
-            case .resume:
+            case .suspendRelease:
                 return DoseEntry(type: .resume, startDate: date, value: 0, unit: .unitsPerHour)
+            default:
+                return nil
+            }
+        }
+    }
+
+    /// AndroidAPS getTbInjectRateRatio 인코딩을 절대값 U/h로 변환
+    private func tbAbsoluteRate(rawRatio: UInt16) -> Double {
+        let ratio = Int(rawRatio)
+        if ratio >= 50000 {
+            // 퍼센트 모드: (ratio - 50000)% of 현재 기저량
+            let percent = Double(ratio - 50000) / 100.0
+            return currentBaseBasalRate * percent
+        } else if ratio >= 1000 {
+            // 절대값 모드: (ratio - 1000) / 100.0 U/h
+            return Double(ratio - 1000) / 100.0
+        }
+        return 0
+    }
+
+    /// 펌프 로그를 조회하여 Trio에 hasNewPumpEvents로 전달한다.
+    func syncLogHistory() {
+        pumpQueue.async { [weak self] in
+            guard let self = self else { return }
+            do {
+                // 경량 로그 상태 조회 (0x56) → pumpLastLogNum/wrappingCount 갱신
+                if let logStatusData = try self.bluetooth.sendPacket(
+                    msgType: DiaconnPacketType.LOG_STATUS_INQUIRE,
+                    timeout: 10.0
+                ), let logStatus = parseLogStatusResponse(logStatusData) {
+                    self.state.pumpLastLogNum = logStatus.lastLogNum
+                    self.state.pumpWrappingCount = logStatus.wrappingCount
+                }
+
+                let entries = try self.fetchNewLogEntries()
+                guard !entries.isEmpty else { return }
+
+                let events = self.logEntriesToPumpEvents(entries)
+                NSLog("[DiaconnKit] syncLogHistory: \(entries.count) entries → \(events.count) events")
+                for event in events {
+                    let doseDesc = event.dose.map { d -> String in
+                        let amount = d.deliveredUnits.map { "\($0)U delivered" } ?? "\(d.type)"
+                        return "doseType=\(d.type) \(amount) start=\(d.startDate) end=\(d.endDate)"
+                    } ?? "no dose"
+                    NSLog("[DiaconnKit]   event: title=\(event.title) eventType=\(String(describing: event.type)) \(doseDesc)")
+                }
+                guard !events.isEmpty else { return }
+
+                let now = Date()
+                self.pumpDelegate.notify { delegate in
+                    guard let delegate = delegate else { return }
+                    delegate.pumpManager(
+                        self,
+                        hasNewPumpEvents: events,
+                        lastReconciliation: now,
+                        replacePendingEvents: false
+                    ) { error in
+                        if let error = error {
+                            NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents error: \(error)")
+                        } else {
+                            NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents stored OK")
+                        }
+                    }
+                }
+            } catch {
+                self.log.error("syncLogHistory failed: \(error)")
+            }
+        }
+    }
+
+    /// DiaconnLogEntry 배열을 LoopKit NewPumpEvent 배열로 변환
+    private func logEntriesToPumpEvents(_ entries: [DiaconnLogEntry]) -> [NewPumpEvent] {
+        entries.compactMap { entry -> NewPumpEvent? in
+            let date = entry.date
+            var rawBytes = Data()
+            rawBytes.append(entry.wrapCount)
+            rawBytes.appendShortLE(entry.logNum)
+
+            switch entry.logKind {
+            case .mealBolusFail,
+                 .mealBolusSuccess:
+                // 펌프에서 식사 버튼으로 수동 주입 → Bolus
+                guard entry.injectAmount > 0 else { return nil }
+                let mealDose = DoseEntry(
+                    type: .bolus,
+                    startDate: date,
+                    endDate: date,
+                    value: entry.injectAmount,
+                    unit: .units,
+                    automatic: false
+                )
+                return NewPumpEvent(date: date, dose: mealDose, raw: rawBytes, title: "Bolus")
+            case .normalBolusFail,
+                 .normalBolusSuccess:
+                guard entry.injectAmount > 0 else { return nil }
+                let isAutomatic = state.lastBolusAutomatic
+                let normalDose = DoseEntry(
+                    type: .bolus,
+                    startDate: date,
+                    endDate: date,
+                    value: entry.injectAmount,
+                    unit: .units,
+                    automatic: isAutomatic
+                )
+                return NewPumpEvent(date: date, dose: normalDose, raw: rawBytes, title: isAutomatic ? "SMB" : "Bolus")
+            case .squareBolusFail,
+                 .squareBolusSuccess:
+                // 스퀘어 완료/취소: 실제 주입량
+                guard entry.injectAmount > 0 else { return nil }
+                let sqDuration = TimeInterval(entry.injectTimeUnit * 10 * 60)
+                let sqDose = DoseEntry(
+                    type: .bolus,
+                    startDate: date,
+                    endDate: date.addingTimeInterval(sqDuration),
+                    value: entry.injectAmount,
+                    unit: .units,
+                    automatic: false
+                )
+                return NewPumpEvent(date: date, dose: sqDose, raw: rawBytes, title: "Extended Bolus")
+            case .dualNormal:
+                // 듀얼 일반주입 결과
+                guard entry.injectAmount > 0 else { return nil }
+                let dualNormDose = DoseEntry(
+                    type: .bolus,
+                    startDate: date,
+                    endDate: date,
+                    value: entry.injectAmount,
+                    unit: .units,
+                    automatic: false
+                )
+                return NewPumpEvent(date: date, dose: dualNormDose, raw: rawBytes, title: "Dual Bolus")
+            case .dualBolusFail,
+                 .dualBolusSuccess:
+                // 듀얼 스퀘어 부분 완료/취소: 실제 주입량
+                guard entry.injectAmount > 0 else { return nil }
+                let dualSqDuration = TimeInterval(entry.injectTimeUnit * 10 * 60)
+                let dualSqDose = DoseEntry(
+                    type: .bolus,
+                    startDate: date,
+                    endDate: date.addingTimeInterval(dualSqDuration),
+                    value: entry.injectAmount,
+                    unit: .units,
+                    automatic: false
+                )
+                return NewPumpEvent(date: date, dose: dualSqDose, raw: rawBytes, title: "Dual Extended Bolus")
+            case .tbStart:
+                let duration = TimeInterval(entry.tbTime * 15 * 60)
+                let rate = tbAbsoluteRate(rawRatio: entry.tbRateRatio)
+                let dose = DoseEntry(
+                    type: .tempBasal,
+                    startDate: date,
+                    endDate: date.addingTimeInterval(duration),
+                    value: rate,
+                    unit: .unitsPerHour,
+                    automatic: true
+                )
+                return NewPumpEvent(date: date, dose: dose, raw: rawBytes, title: "Temp Basal")
+            case .suspend:
+                let dose = DoseEntry(type: .suspend, startDate: date, value: 0, unit: .unitsPerHour)
+                return NewPumpEvent(date: date, dose: dose, raw: rawBytes, title: "Suspend")
+            case .suspendRelease:
+                let dose = DoseEntry(type: .resume, startDate: date, value: 0, unit: .unitsPerHour)
+                return NewPumpEvent(date: date, dose: dose, raw: rawBytes, title: "Resume")
+            case .changeInjector:
+                return NewPumpEvent(date: date, dose: nil, raw: rawBytes, title: "Insulin Change", type: .rewind)
+            case .changeTube:
+                return NewPumpEvent(date: date, dose: nil, raw: rawBytes, title: "Tube Prime", type: .prime)
+            case .changeNeedle:
+                return NewPumpEvent(date: date, dose: nil, raw: rawBytes, title: "Cannula Change", type: .prime)
+            case .alarmBattery:
+                return NewPumpEvent(date: date, dose: nil, raw: rawBytes, title: "Battery Low", type: .alarm)
+            case .alarmBlock:
+                return NewPumpEvent(date: date, dose: nil, raw: rawBytes, title: "Injection Blocked", type: .alarm)
+            case .alarmShortAge:
+                return NewPumpEvent(date: date, dose: nil, raw: rawBytes, title: "Insulin Low", type: .alarm)
+            case .resetSys:
+                return NewPumpEvent(date: date, dose: nil, raw: rawBytes, title: "Pump Reset", type: .alarm)
             default:
                 return nil
             }
@@ -1138,6 +1385,7 @@ extension DiaconnPumpManager {
         doseReporter?.notify(deliveredUnits: deliveredUnits, done: true)
         doseReporter = nil
         notifyStateDidChange()
+        syncLogHistory()
     }
 
     func notifyBolusDidUpdate(deliveredUnits: Double) {

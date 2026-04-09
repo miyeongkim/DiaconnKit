@@ -427,118 +427,230 @@ func generateTempBasalInquirePacket() -> Data {
     DiaconnPacketEncoder.encode(msgType: DiaconnPacketType.TEMP_BASAL_INQUIRE)
 }
 
+// MARK: - 로그 상태 조회 (msgType: 0x56, 응답: 0x96)
+
+/// 로그 상태 (lastLogNum, wrappingCount)
+public struct DiaconnLogStatus {
+    public var lastLogNum: UInt16 = 0
+    public var wrappingCount: UInt8 = 0
+}
+
+/// LogStatusInquire 응답 파싱: result(1) + lastLogNum(2 LE) + wrappingCount(1)
+public func parseLogStatusResponse(_ data: Data) -> DiaconnLogStatus? {
+    guard DiaconnPacketDecoder.validatePacket(data) == 0 else { return nil }
+    let payload = DiaconnPacketDecoder.getPayload(data)
+    guard payload.count >= 4 else { return nil }
+
+    let result = payload[0]
+    guard Int(result) == DiaconnPacketType.InquireResult.success.rawValue else { return nil }
+
+    var status = DiaconnLogStatus()
+    status.lastLogNum = DiaconnPacketDecoder.readShort(payload, offset: 1)
+    status.wrappingCount = payload[3]
+    return status
+}
+
 // MARK: - 대량 로그 조회 (msgType: 0x72, 응답: 0xB2, 182바이트)
 
-/// 로그 이벤트 종류
+/// 로그 이벤트 종류 (AndroidAPS PumpLogUtil.getKind 기준 — typeAndKind 바이트의 하위 6비트)
 public enum DiaconnLogKind: UInt8 {
-    case mealBolus = 0x01
-    case snackBolus = 0x02
-    case squareBolus = 0x03
-    case dualBolus = 0x04
-    case basalChange = 0x05
-    case tempBasalStart = 0x06
-    case tempBasalEnd = 0x07
-    case suspend = 0x08
-    case resume = 0x09
-    case alarm = 0x0A
+    case resetSys = 0x01 // 시스템 리셋 (배터리 교체 등)
+    case suspend = 0x03 // 일시정지 시작
+    case suspendRelease = 0x04 // 일시정지 해제
+    case mealBolusSuccess = 0x08 // 식사주입 성공
+    case mealBolusFail = 0x09 // 식사주입 실패
+    case normalBolusSuccess = 0x0A // 일반주입 성공
+    case normalBolusFail = 0x0B // 일반주입 실패
+    case squareBolusSet = 0x0C // 스퀘어주입 설정
+    case squareBolusSuccess = 0x0D // 스퀘어주입 성공
+    case squareBolusFail = 0x0E // 스퀘어주입 실패
+    case dualBolusSet = 0x0F // 듀얼주입 설정
+    case dualBolusSuccess = 0x10 // 듀얼주입 성공
+    case dualBolusFail = 0x11 // 듀얼주입 실패
+    case tbStart = 0x12 // 임시기저 시작
+    case tbStop = 0x13 // 임시기저 중지
+    case changeTube = 0x18 // 튜브 교체 (프라이밍)
+    case changeInjector = 0x1A // 주사기 교체 (인슐린 교체)
+    case changeNeedle = 0x1C // 바늘 교체 (캐뉼라 교체)
+    case alarmBattery = 0x28 // 배터리 부족 알람
+    case alarmBlock = 0x29 // 주입 막힘 알람
+    case alarmShortAge = 0x2A // 인슐린 부족 알람
+    case hourBasal = 0x2C // 1시간 기저 주입량
+    case dualNormal = 0x35 // 듀얼(일반) 주입량
     case unknown = 0xFF
 }
 
-/// 로그 항목 하나
+/// 로그 항목 하나 (AndroidAPS BigLogInquireResponsePacket 구조 기준)
 public struct DiaconnLogEntry {
     public var logNum: UInt16
     public var wrapCount: UInt8
     public var logKind: DiaconnLogKind
-    public var year: Int
-    public var month: Int
-    public var day: Int
-    public var hour: Int
-    public var minute: Int
-    public var second: Int
-    /// 볼루스량 또는 기저량 (U)
-    public var amount: Double
-    /// 임시 기저 비율 (%) 또는 속도
-    public var rate: Double
-    /// 지속 시간 (분)
-    public var durationMin: Int
-
-    public var date: Date {
-        var cal = Calendar(identifier: .gregorian)
-        cal.timeZone = TimeZone.current
-        return cal.date(from: DateComponents(
-            year: year, month: month, day: day,
-            hour: hour, minute: minute, second: second
-        )) ?? Date()
-    }
+    /// logData[0-3]: 4바이트 LE Unix timestamp (UTC)
+    public var date: Date
+    /// 실제 주입량 (U) — injectAmount / 100
+    public var injectAmount: Double
+    /// 설정 주입량 (U) — setAmount / 100
+    public var setAmount: Double
+    /// 임시기저 rate/ratio 원시값 (getTbInjectRateRatio)
+    /// - <  50000: 절대값 모드 → (값 - 1000) / 100.0 U/h
+    /// - >= 50000: 퍼센트 모드 → (값 - 50000) % of 기저량
+    public var tbRateRatio: UInt16
+    /// 임시기저 시간 단위 (1단위 = 15분)
+    public var tbTime: Int
+    /// 스퀘어/듀얼 볼루스 주입시간 단위 (1단위 = 10분), 식사/일반은 직접 분
+    public var injectTimeUnit: Int
 }
 
 /// BIG_LOG_INQUIRE 요청 패킷 생성
-/// - Parameters:
-///   - wrapCount: 조회 시작 위치의 wrapping count
-///   - logNum: 조회 시작 로그 번호
-func generateBigLogInquirePacket(wrapCount: UInt8, logNum: UInt16) -> Data {
+/// payload: start(2 LE) + end(2 LE) + delay(1)
+func generateBigLogInquirePacket(start: UInt16, end: UInt16, delay: UInt8 = 100) -> Data {
     var payload = Data()
-    payload.append(wrapCount)
-    payload.appendShortLE(logNum)
+    payload.appendShortLE(start)
+    payload.appendShortLE(end)
+    payload.append(delay)
     return DiaconnPacketEncoder.encode(msgType: DiaconnPacketType.BIG_LOG_INQUIRE, payload: payload)
 }
 
 /// BIG_LOG_INQUIRE_RESPONSE (0xB2, 182바이트) 파싱
-/// 응답 payload 구조 (AndroidAPS DiaconnG8BigLogInquireResponsePacket 기준):
-///   offset 0     : result (1바이트, 16=success)
-///   offset 1+    : 로그 항목 반복 (항목당 15바이트)
-///     +0  logKind   (1)
-///     +1  year      (1, +2000)
-///     +2  month     (1)
-///     +3  day       (1)
-///     +4  hour      (1)
-///     +5  minute    (1)
-///     +6  second    (1)
-///     +7  logNum    (2, UInt16 LE)
-///     +9  wrapCount (1)
-///     +10 amount    (2, UInt16 LE, /100 → U)
-///     +12 rate      (2, UInt16 LE, /100 → U/h 또는 %)
-///     +14 duration  (1, 분)
+/// payload 구조 (AndroidAPS BigLogInquireResponsePacket 기준):
+///   [0]   result (1바이트, 16=success)
+///   [1]   logLength (1바이트, 로그 갯수)
+///   [2..] 로그 항목 반복 (항목당 15바이트):
+///     +0  wrapCount  (1)
+///     +1  logNum     (2, LE)
+///     +3  logData    (12): [0-3]=LE Unix timestamp, [4]=type(2b)+kind(6b), [5-11]=로그별 필드
 public func parseBigLogInquireResponse(_ data: Data) -> [DiaconnLogEntry]? {
-    guard DiaconnPacketDecoder.validatePacket(data) == 0 else { return nil }
+    let validationResult = DiaconnPacketDecoder.validatePacket(data)
+    guard validationResult == 0 else {
+        NSLog(
+            "[DiaconnKit] parseBigLogInquireResponse: validatePacket failed defect=\(validationResult) dataLen=\(data.count) sop=\(data.isEmpty ? 0 : data[0])"
+        )
+        return nil
+    }
     let payload = DiaconnPacketDecoder.getPayload(data)
-    guard !payload.isEmpty else { return nil }
+    guard payload.count >= 2 else {
+        NSLog("[DiaconnKit] parseBigLogInquireResponse: payload too short (\(payload.count))")
+        return nil
+    }
 
-    let result = DiaconnPacketDecoder.readByte(payload, offset: 0)
-    guard Int(result) == DiaconnPacketType.InquireResult.success.rawValue else { return nil }
+    let result = payload[0]
+    guard Int(result) == DiaconnPacketType.InquireResult.success.rawValue else {
+        NSLog(
+            "[DiaconnKit] parseBigLogInquireResponse: result=\(result) expected=\(DiaconnPacketType.InquireResult.success.rawValue)"
+        )
+        return nil
+    }
+
+    let logLength = Int(payload[1])
+    guard logLength > 0 else { return [] }
 
     let entrySize = 15
-    let dataStart = 1
-    let entryCount = (payload.count - dataStart) / entrySize
-
+    let dataStart = 2
     var entries: [DiaconnLogEntry] = []
 
-    for i in 0 ..< entryCount {
+    for i in 0 ..< logLength {
         let base = dataStart + i * entrySize
         guard base + entrySize <= payload.count else { break }
 
-        let rawKind = DiaconnPacketDecoder.readByte(payload, offset: base + 0)
+        let wrapCount = payload[base]
+        let logNum = DiaconnPacketDecoder.readShort(payload, offset: base + 1)
+
+        let d = base + 3
+
+        // [0-3]: 4바이트 LE timestamp (펌프 로컬 시간 기준 epoch)
+        let tsRaw = UInt32(payload[d])
+            | (UInt32(payload[d + 1]) << 8)
+            | (UInt32(payload[d + 2]) << 16)
+            | (UInt32(payload[d + 3]) << 24)
+        // 펌프는 로컬 시간으로 timestamp를 저장 → timezone offset을 빼서 UTC로 변환
+        let date = Date(timeIntervalSince1970: TimeInterval(tsRaw) - TimeInterval(TimeZone.current.secondsFromGMT()))
+
+        // [4]: type(상위2비트) + kind(하위6비트)
+        let rawKind = payload[d + 4] & 0x3F
         let kind = DiaconnLogKind(rawValue: rawKind) ?? .unknown
 
-        // 패딩(0xFF)으로 채워진 항목은 skip
-        if rawKind == 0xFF { break }
+        var injectAmount: Double = 0
+        var setAmount: Double = 0
+        var tbRateRatio: UInt16 = 0
+        var tbTime: Int = 0
+        var injectTimeUnit: Int = 0
+
+        switch kind {
+        case .mealBolusFail,
+             .mealBolusSuccess,
+             .normalBolusFail,
+             .normalBolusSuccess:
+            setAmount = Double(DiaconnPacketDecoder.readShort(payload, offset: d + 5)) / 100.0
+            injectAmount = Double(DiaconnPacketDecoder.readShort(payload, offset: d + 7)) / 100.0
+            injectTimeUnit = Int(payload[d + 9])
+
+        case .squareBolusSet:
+            setAmount = Double(DiaconnPacketDecoder.readShort(payload, offset: d + 5)) / 100.0
+            injectAmount = setAmount
+            injectTimeUnit = Int(payload[d + 7])
+
+        case .squareBolusFail,
+             .squareBolusSuccess:
+            injectAmount = Double(DiaconnPacketDecoder.readShort(payload, offset: d + 5)) / 100.0
+            injectTimeUnit = Int(payload[d + 7])
+
+        case .dualBolusSet:
+            injectAmount = Double(DiaconnPacketDecoder.readShort(payload, offset: d + 5)) / 100.0
+            setAmount = Double(DiaconnPacketDecoder.readShort(payload, offset: d + 7)) / 100.0
+            injectTimeUnit = Int(payload[d + 9])
+
+        case .dualNormal:
+            setAmount = Double(DiaconnPacketDecoder.readShort(payload, offset: d + 5)) / 100.0
+            injectAmount = Double(DiaconnPacketDecoder.readShort(payload, offset: d + 7)) / 100.0
+            injectTimeUnit = Int(payload[d + 9])
+
+        case .dualBolusFail,
+             .dualBolusSuccess:
+            injectAmount = Double(DiaconnPacketDecoder.readShort(payload, offset: d + 5)) / 100.0
+            setAmount = Double(DiaconnPacketDecoder.readShort(payload, offset: d + 7)) / 100.0
+            injectTimeUnit = Int(payload[d + 9])
+
+        case .tbStart:
+            // tbTime: 1단위=15분, tbRateRatio: 절대값 or 퍼센트 인코딩
+            tbTime = Int(payload[d + 5])
+            tbRateRatio = DiaconnPacketDecoder.readShort(payload, offset: d + 6)
+
+        case .tbStop:
+            tbRateRatio = DiaconnPacketDecoder.readShort(payload, offset: d + 5)
+
+        case .alarmBattery,
+             .alarmBlock,
+             .alarmShortAge,
+             .changeInjector,
+             .changeNeedle,
+             .changeTube,
+             .hourBasal,
+             .resetSys,
+             .suspend,
+             .suspendRelease:
+            break
+
+        default:
+            continue
+        }
 
         let entry = DiaconnLogEntry(
-            logNum: DiaconnPacketDecoder.readShort(payload, offset: base + 7),
-            wrapCount: DiaconnPacketDecoder.readByte(payload, offset: base + 9),
+            logNum: logNum,
+            wrapCount: wrapCount,
             logKind: kind,
-            year: Int(DiaconnPacketDecoder.readByte(payload, offset: base + 1)) + 2000,
-            month: Int(DiaconnPacketDecoder.readByte(payload, offset: base + 2)),
-            day: Int(DiaconnPacketDecoder.readByte(payload, offset: base + 3)),
-            hour: Int(DiaconnPacketDecoder.readByte(payload, offset: base + 4)),
-            minute: Int(DiaconnPacketDecoder.readByte(payload, offset: base + 5)),
-            second: Int(DiaconnPacketDecoder.readByte(payload, offset: base + 6)),
-            amount: Double(DiaconnPacketDecoder.readShort(payload, offset: base + 10)) / 100.0,
-            rate: Double(DiaconnPacketDecoder.readShort(payload, offset: base + 12)) / 100.0,
-            durationMin: Int(DiaconnPacketDecoder.readByte(payload, offset: base + 14))
+            date: date,
+            injectAmount: injectAmount,
+            setAmount: setAmount,
+            tbRateRatio: tbRateRatio,
+            tbTime: tbTime,
+            injectTimeUnit: injectTimeUnit
+        )
+        NSLog(
+            "[DiaconnKit] LOG #\(logNum)(wrap=\(wrapCount)) kind=\(kind)(0x\(String(format: "%02X", rawKind))) date=\(date) injectAmount=\(injectAmount) setAmount=\(setAmount) tbRateRatio=\(tbRateRatio) tbTime=\(tbTime) injectTimeUnit=\(injectTimeUnit)"
         )
         entries.append(entry)
     }
 
+    NSLog("[DiaconnKit] parseBigLogInquireResponse: parsed \(entries.count)/\(logLength) entries")
     return entries
 }

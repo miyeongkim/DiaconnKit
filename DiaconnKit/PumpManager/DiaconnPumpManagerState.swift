@@ -63,6 +63,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
 
     internal var lastBolusAmount: Double = 0
     internal var lastBolusDate: Date?
+    internal var lastBolusAutomatic: Bool = false
     internal var deliveredUnits: Double?
     internal var totalUnits: Double?
     internal var maxBolus: Double = 0
@@ -76,6 +77,12 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
     internal var maxBasalPerHour: Double = 0
     internal var maxBasal: Double = 0 // maxBasalPerHour * 2.5
 
+    // MARK: - 오늘 주입 합계
+
+    internal var todayBasalAmount: Double = 0
+    internal var todayMealAmount: Double = 0
+    internal var todaySnackAmount: Double = 0
+
     // MARK: - 로그 동기화 커서
 
     /// 펌프에서 마지막으로 보고된 로그 번호 (BigAPSMainInfo에서 갱신)
@@ -88,6 +95,8 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
     internal var storedWrappingCount: UInt8 = 0
     /// 최초 연결 여부 — true면 현재 위치를 기준점으로만 저장하고 과거 로그는 skip
     internal var isFirstLogSync: Bool = true
+    /// 로그 동기화 시점의 펌프 시리얼 — 다른 펌프 연결 감지용
+    internal var syncedSerialNumber: String?
 
     // MARK: - OTP (2단계 커밋용)
 
@@ -172,11 +181,12 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         pumpTimeSyncedAt = rawValue["pumpTimeSyncedAt"] as? Date
         cannulaDate = rawValue["cannulaDate"] as? Date
         reservoirDate = rawValue["reservoirDate"] as? Date
-        pumpLastLogNum = rawValue["pumpLastLogNum"] as? UInt16 ?? 0
-        pumpWrappingCount = rawValue["pumpWrappingCount"] as? UInt8 ?? 0
-        storedLastLogNum = rawValue["storedLastLogNum"] as? UInt16 ?? 0
-        storedWrappingCount = rawValue["storedWrappingCount"] as? UInt8 ?? 0
+        pumpLastLogNum = UInt16((rawValue["pumpLastLogNum"] as? Int) ?? 0)
+        pumpWrappingCount = UInt8((rawValue["pumpWrappingCount"] as? Int) ?? 0)
+        storedLastLogNum = UInt16((rawValue["storedLastLogNum"] as? Int) ?? 0)
+        storedWrappingCount = UInt8((rawValue["storedWrappingCount"] as? Int) ?? 0)
         isFirstLogSync = rawValue["isFirstLogSync"] as? Bool ?? true
+        syncedSerialNumber = rawValue["syncedSerialNumber"] as? String
 
         if let rawInsulinType = rawValue["insulinType"] as? InsulinType.RawValue {
             insulinType = InsulinType(rawValue: rawInsulinType)
@@ -226,11 +236,12 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         value["pumpTimeSyncedAt"] = pumpTimeSyncedAt
         value["cannulaDate"] = cannulaDate
         value["reservoirDate"] = reservoirDate
-        value["pumpLastLogNum"] = pumpLastLogNum
-        value["pumpWrappingCount"] = pumpWrappingCount
-        value["storedLastLogNum"] = storedLastLogNum
-        value["storedWrappingCount"] = storedWrappingCount
+        value["pumpLastLogNum"] = Int(pumpLastLogNum)
+        value["pumpWrappingCount"] = Int(pumpWrappingCount)
+        value["storedLastLogNum"] = Int(storedLastLogNum)
+        value["storedWrappingCount"] = Int(storedWrappingCount)
         value["isFirstLogSync"] = isFirstLogSync
+        value["syncedSerialNumber"] = syncedSerialNumber
 
         return value
     }
@@ -267,6 +278,11 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         beepAndAlarm = pumpStatus.beepAndAlarm
         alarmIntensity = pumpStatus.alarmIntensity
 
+        // 오늘 주입 합계
+        todayBasalAmount = pumpStatus.todayBasalAmount
+        todayMealAmount = pumpStatus.todayMealAmount
+        todaySnackAmount = pumpStatus.todaySnackAmount
+
         // 기저 상태 업데이트
         if isPumpSuspended {
             basalDeliveryOrdinal = .suspended
@@ -279,6 +295,8 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         }
 
         // 펌프 현재 로그 위치 갱신 (새 로그 감지에 사용)
+        let prevStoredLast = storedLastLogNum
+        let prevStoredWrap = storedWrappingCount
         pumpLastLogNum = pumpStatus.lastLogNum
         pumpWrappingCount = pumpStatus.wrappingCount
 
@@ -287,6 +305,9 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
             storedLastLogNum = pumpStatus.lastLogNum
             storedWrappingCount = pumpStatus.wrappingCount
         }
+        NSLog(
+            "[DiaconnKit] updateFromPumpStatus: pumpLast=\(pumpLastLogNum) pumpWrap=\(pumpWrappingCount) storedLast=\(prevStoredLast)→\(storedLastLogNum) storedWrap=\(prevStoredWrap)→\(storedWrappingCount) isFirst=\(isFirstLogSync)"
+        )
 
         // 펌프 시간
         var calendar = Calendar(identifier: .gregorian)
