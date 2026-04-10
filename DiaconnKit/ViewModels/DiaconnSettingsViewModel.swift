@@ -8,7 +8,7 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
     @Published var reservoirLevel: Double = 0
     @Published var batteryRemaining: Double = 0
     @Published var firmwareVersion: String?
-    @Published var basalStateDescription: String = "알 수 없음"
+    @Published var basalStateDescription: String = "Unknown"
     @Published var isRefreshing: Bool = false
     @Published var refreshErrorMessage: String?
     @Published var insulinType: InsulinType?
@@ -29,6 +29,9 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
     @Published var storedWrapCount: UInt8 = 0
     @Published var editStoredLogNum: String = ""
     @Published var editStoredWrapCount: String = ""
+    @Published var cannulaDate: Date?
+    @Published var reservoirDate: Date?
+    @Published var activeAlert: DiaconnPumpManagerAlert?
 
     let allowedInsulinTypes: [InsulinType]
 
@@ -45,6 +48,10 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
 
     func updateFromState() {
         guard let state = pumpManager?.state else { return }
+        updateFromNewState(state)
+    }
+
+    private func updateFromNewState(_ state: DiaconnPumpManagerState) {
         isConnected = pumpManager?.isBluetoothConnected ?? state.isConnected
         reservoirLevel = state.reservoirLevel
         batteryRemaining = state.batteryRemaining
@@ -64,12 +71,15 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
         pumpWrapCount = state.pumpWrappingCount
         storedLogNum = state.storedLastLogNum
         storedWrapCount = state.storedWrappingCount
+        cannulaDate = state.cannulaDate
+        reservoirDate = state.reservoirDate
+        activeAlert = pumpManager?.activeAlert
 
         switch state.basalDeliveryOrdinal {
-        case .active: basalStateDescription = "활성"
-        case .suspended: basalStateDescription = "중단됨"
+        case .active: basalStateDescription = "Active"
+        case .suspended: basalStateDescription = "Suspended"
         case .tempBasal:
-            basalStateDescription = state.tempBasalUnits.map { String(format: "임시 기저 %.2fU/hr", $0) } ?? "임시 기저"
+            basalStateDescription = state.tempBasalUnits.map { String(format: "Temp Basal %.2fU/hr", $0) } ?? "Temp Basal"
         }
     }
 
@@ -106,11 +116,17 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
         isSuspending = true
         if isSuspended {
             pumpManager?.resumeDelivery { [weak self] _ in
-                DispatchQueue.main.async { self?.isSuspending = false }
+                DispatchQueue.main.async {
+                    self?.isSuspending = false
+                    self?.updateFromState()
+                }
             }
         } else {
             pumpManager?.suspendDelivery { [weak self] _ in
-                DispatchQueue.main.async { self?.isSuspending = false }
+                DispatchQueue.main.async {
+                    self?.isSuspending = false
+                    self?.updateFromState()
+                }
             }
         }
     }
@@ -132,15 +148,58 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
         insulinType = newType
     }
 
+    // MARK: - Device Lifecycle
+
+    private static let lifecycleDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .short
+        f.timeStyle = .short
+        return f
+    }()
+
+    var cannulaDateString: String {
+        cannulaDate.map { Self.lifecycleDateFormatter.string(from: $0) }
+            ?? LocalizedString("Unknown", comment: "Unknown date")
+    }
+
+    var reservoirDateString: String {
+        reservoirDate.map { Self.lifecycleDateFormatter.string(from: $0) }
+            ?? LocalizedString("Unknown", comment: "Unknown date")
+    }
+
+    func markCannulaChanged() {
+        pumpManager?.state.cannulaDate = Date()
+        pumpManager?.notifyStateDidChange()
+        updateFromState()
+    }
+
+    func markReservoirChanged() {
+        pumpManager?.state.reservoirDate = Date()
+        pumpManager?.notifyStateDidChange()
+        updateFromState()
+    }
+
+    // MARK: - Alert Acknowledgement
+
+    func acknowledgeAlert() {
+        pumpManager?.dismissActiveAlert()
+    }
+
+    // MARK: - Diagnostics
+
+    func testCommunication() {
+        refreshStatus()
+    }
+
     // MARK: - DiaconnStateObserver
 
-    func stateDidUpdate(_: DiaconnPumpManagerState, _: DiaconnPumpManagerState) {
-        updateFromState()
+    func stateDidUpdate(_ newState: DiaconnPumpManagerState, _: DiaconnPumpManagerState) {
+        updateFromNewState(newState)
     }
 
     func deviceScanDidUpdate(_: DiaconnPumpScan) {}
 
-    // MARK: - 디버그: 로그 커서 변경
+    // MARK: - Debug: log cursor change
 
     func applyStoredLogNum() {
         guard let value = UInt16(editStoredLogNum) else { return }
@@ -162,15 +221,15 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
         guard !isRefreshing else { return }
         isRefreshing = true
         refreshErrorMessage = nil
-        // 연결이 끊겨 있으면 재연결 후 상태 조회, 연결 중이면 바로 상태 조회
+        // If disconnected, reconnect then query status; if connected, query status directly
         pumpManager?.ensureCurrentPumpData { [weak self] _ in
             DispatchQueue.main.async {
                 self?.isRefreshing = false
                 self?.updateFromState()
-                // 연결 시도 후에도 여전히 연결 안 된 경우 에러 메시지 표시
+                // Show error message if still disconnected after connection attempt
                 if self?.isConnected == false {
                     self?.refreshErrorMessage = LocalizedString(
-                        "펌프에 연결할 수 없습니다. 펌프가 가까이 있는지 확인하세요.",
+                        "Unable to connect to pump. Make sure the pump is nearby.",
                         comment: "Error shown when pump reconnection fails"
                     )
                 }

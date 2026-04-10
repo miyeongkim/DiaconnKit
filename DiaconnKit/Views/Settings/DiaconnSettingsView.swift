@@ -13,31 +13,281 @@ struct DiaconnSettingsView: View {
         return f
     }()
 
+    private static let dateTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
     var body: some View {
         List {
-            Section(header: Text("펌프 상태")) {
+            // MARK: - Header: Pump Image + Status Dashboard
+
+            Section {
                 HStack {
-                    Text("연결 상태")
                     Spacer()
-                    Text(viewModel.isConnected ? "연결됨" : "연결 안됨")
-                        .foregroundColor(viewModel.isConnected ? .green : .red)
+                    Image(
+                        uiImage: UIImage(
+                            named: "diacong8",
+                            in: Bundle(for: DiaconnSettingsViewModel.self),
+                            compatibleWith: nil
+                        ) ?? UIImage()
+                    )
+                    .resizable()
+                    .scaledToFit()
+                    .padding(.horizontal)
+                    .frame(height: 150)
+                    Spacer()
+                }
+
+                HStack(alignment: .top) {
+                    deliveryStatus
+                    Spacer()
+                    reservoirStatus
+                }
+                .padding(.bottom, 5)
+
+                if let alert = viewModel.activeAlert {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.red)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(alert.contentTitle)
+                                .font(.subheadline)
+                                .fontWeight(.bold)
+                            Text(alert.contentBody)
+                                .font(.footnote)
+                        }
+                    }
+                    .padding(.vertical, 4)
+
+                    Button(action: {
+                        viewModel.acknowledgeAlert()
+                    }) {
+                        Text(LocalizedString("Acknowledge", comment: "Button to acknowledge alert"))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
+                }
+            }
+
+            // MARK: - Pump Control Actions
+
+            Section {
+                if viewModel.basalDeliveryState != nil {
+                    Button(action: {
+                        viewModel.suspendResumeButtonPressed()
+                    }) {
+                        HStack {
+                            Image(
+                                systemName: viewModel.isSuspended
+                                    ? "play.circle.fill" : "pause.circle.fill"
+                            )
+                            .font(.system(size: 22))
+                            .foregroundColor(viewModel.isSuspended ? .green : .orange)
+                            Text(viewModel.suspendResumeButtonLabel)
+                                .foregroundColor(viewModel.isSuspended ? .green : .orange)
+                            if viewModel.isSuspending {
+                                Spacer()
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(viewModel.isSuspending)
+                }
+
+                Button(action: {
+                    viewModel.refreshStatus()
+                }) {
+                    HStack {
+                        Text(
+                            LocalizedString(
+                                "Sync Pump Data", comment: "Button to sync pump data"
+                            )
+                        )
+                        Spacer()
+                        if viewModel.isRefreshing {
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(viewModel.isRefreshing)
+
+                HStack {
+                    Text(LocalizedString("Status", comment: "Connection status label"))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    HStack(spacing: 6) {
+                        Text(viewModel.isConnected ? "Connected" : "Disconnected")
+                            .foregroundColor(.secondary)
+                        Circle()
+                            .fill(viewModel.isConnected ? Color.green : Color.red)
+                            .frame(width: 10, height: 10)
+                    }
+                }
+
+                if let errorMessage = viewModel.refreshErrorMessage {
+                    Text(errorMessage)
+                        .foregroundColor(.red)
+                        .font(.footnote)
                 }
 
                 HStack {
-                    Text("리저버")
+                    Text(
+                        LocalizedString(
+                            "Last Sync", comment: "Text for last sync time"
+                        )
+                    )
+                    .foregroundColor(.primary)
                     Spacer()
-                    Text(String(format: "%.1fU", viewModel.reservoirLevel))
+                    Text(
+                        viewModel.pumpTime.map { Self.dateTimeFormatter.string(from: $0) }
+                            ?? LocalizedString("Unknown", comment: "Unknown time")
+                    )
+                    .foregroundColor(.secondary)
                 }
+
+                // Component age tracking
+                HStack {
+                    Text(
+                        LocalizedString(
+                            "Cannula Age", comment: "Text for cannula age"
+                        )
+                    )
+                    .foregroundColor(.primary)
+                    Spacer()
+                    Text(viewModel.cannulaDateString)
+                        .foregroundColor(.secondary)
+                }
+                .onLongPressGesture { viewModel.markCannulaChanged() }
 
                 HStack {
-                    Text("배터리")
+                    Text(
+                        LocalizedString(
+                            "Reservoir Age", comment: "Text for reservoir age"
+                        )
+                    )
+                    .foregroundColor(.primary)
                     Spacer()
-                    Text(String(format: "%.0f%%", viewModel.batteryRemaining * 100))
+                    Text(viewModel.reservoirDateString)
+                        .foregroundColor(.secondary)
+                }
+                .onLongPressGesture { viewModel.markReservoirChanged() }
+            }
+
+            // MARK: - Configuration
+
+            Section(
+                header: Text(
+                    LocalizedString(
+                        "Configuration", comment: "Configuration section header"
+                    )
+                )
+            ) {
+                NavigationLink(
+                    destination: InsulinTypeSetting(
+                        initialValue: viewModel.insulinType,
+                        supportedInsulinTypes: viewModel.allowedInsulinTypes,
+                        allowUnsetInsulinType: false,
+                        didChange: viewModel.didChangeInsulinType
+                    ).navigationTitle(
+                        LocalizedString(
+                            "Insulin Type",
+                            comment: "Title for insulin type settings"
+                        )
+                    )
+                ) {
+                    HStack {
+                        Text(
+                            LocalizedString(
+                                "Insulin Type",
+                                comment: "Insulin type settings label"
+                            )
+                        )
+                        Spacer()
+                        Text(
+                            viewModel.insulinType?.brandName
+                                ?? LocalizedString(
+                                    "Unknown", comment: "Unknown insulin type"
+                                )
+                        )
+                        .foregroundColor(.secondary)
+                    }
                 }
 
+                NavigationLink(
+                    destination: DiaconnBolusSpeedView(
+                        currentSpeed: viewModel.bolusSpeed,
+                        didChange: viewModel.setBolusSpeed
+                    )
+                ) {
+                    HStack {
+                        Text(
+                            LocalizedString(
+                                "Bolus Speed",
+                                comment: "Bolus speed settings label"
+                            )
+                        )
+                        Spacer()
+                        Text(
+                            LocalizedString(
+                                "Speed \(viewModel.bolusSpeed)",
+                                comment: "Current bolus speed value"
+                            )
+                        )
+                        .foregroundColor(.secondary)
+                    }
+                }
+
+                NavigationLink(
+                    destination: DiaconnSoundSettingView(
+                        currentType: viewModel.beepAndAlarm,
+                        currentIntensity: viewModel.alarmIntensity,
+                        didChange: { type, intensity in
+                            viewModel.setSoundSetting(
+                                type: type, intensity: intensity
+                            )
+                        }
+                    )
+                ) {
+                    HStack {
+                        Text(
+                            LocalizedString(
+                                "Pump Sound",
+                                comment: "Pump sound settings label"
+                            )
+                        )
+                        Spacer()
+                        Text(
+                            DiaconnAlarmType(rawValue: viewModel.beepAndAlarm)?
+                                .title ?? ""
+                        )
+                        .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            // MARK: - Pump Information
+
+            Section(
+                header: Text(
+                    LocalizedString(
+                        "Pump Information",
+                        comment: "Pump information section header"
+                    )
+                )
+            ) {
                 if let serial = viewModel.serialNumber {
                     HStack {
-                        Text("시리얼 번호")
+                        Text(
+                            LocalizedString(
+                                "Serial Number",
+                                comment: "Serial number label"
+                            )
+                        )
+                        .foregroundColor(.primary)
                         Spacer()
                         Text(serial)
                             .foregroundColor(.secondary)
@@ -46,7 +296,12 @@ struct DiaconnSettingsView: View {
 
                 if let firmware = viewModel.firmwareVersion {
                     HStack {
-                        Text("펌웨어")
+                        Text(
+                            LocalizedString(
+                                "Firmware", comment: "Firmware version label"
+                            )
+                        )
+                        .foregroundColor(.primary)
                         Spacer()
                         Text(firmware)
                             .foregroundColor(.secondary)
@@ -54,189 +309,306 @@ struct DiaconnSettingsView: View {
                 }
 
                 HStack {
-                    Text(LocalizedString("Pump Time", comment: "The title of the pump time row"))
+                    Text(
+                        LocalizedString(
+                            "Battery", comment: "Battery level label"
+                        )
+                    )
+                    .foregroundColor(.primary)
+                    Spacer()
+                    Text(
+                        String(
+                            format: "%.0f%%",
+                            viewModel.batteryRemaining * 100
+                        )
+                    )
+                    .foregroundColor(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Max Basal")
+                        Spacer()
+                        Text(
+                            String(
+                                format: "%.2f U/h",
+                                viewModel.maxBasalPerHour
+                            )
+                        )
+                        .foregroundColor(.secondary)
+                    }
+                    Text(
+                        "Maximum basal insulin amount that can be delivered per hour."
+                    )
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("Max Bolus")
+                        Spacer()
+                        Text(
+                            String(format: "%.1f U", viewModel.maxBolus)
+                        )
+                        .foregroundColor(.secondary)
+                    }
+                    Text(
+                        "Maximum insulin amount that can be delivered per single bolus."
+                    )
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                }
+            }
+
+            // MARK: - Pump Time
+
+            Section(
+                header: Text(
+                    LocalizedString(
+                        "Pump Time", comment: "Pump time section header"
+                    )
+                )
+            ) {
+                HStack {
+                    Text(
+                        LocalizedString(
+                            "Pump Time", comment: "Pump time label"
+                        )
+                    )
+                    .foregroundColor(.primary)
                     Spacer()
                     if let pumpTime = viewModel.pumpTime {
-                        Text(Self.timeFormatter.string(from: pumpTime))
+                        Text(Self.dateTimeFormatter.string(from: pumpTime))
                             .foregroundColor(.secondary)
                     } else {
-                        Text(LocalizedString("Unknown", comment: "Unknown pump time"))
-                            .foregroundColor(.secondary)
+                        Text(
+                            LocalizedString(
+                                "Unknown", comment: "Unknown pump time"
+                            )
+                        )
+                        .foregroundColor(.secondary)
                     }
                 }
 
-                Button(action: {
-                    viewModel.refreshStatus()
-                }) {
+                HStack {
+                    Text(
+                        LocalizedString(
+                            "Current Basal Rate",
+                            comment: "Current basal rate label"
+                        )
+                    )
+                    .foregroundColor(.primary)
+                    Spacer()
+                    Text(
+                        String(
+                            format: "%.2f U/h",
+                            viewModel.currentBasalRate
+                        )
+                    )
+                    .foregroundColor(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        if viewModel.isRefreshing {
-                            ProgressView().scaleEffect(0.8)
-                        } else {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        Text(viewModel.isRefreshing ? "조회 중..." : "상태 새로고침")
+                        Text(
+                            LocalizedString(
+                                "Today Total Delivery",
+                                comment: "Today total delivery label"
+                            )
+                        )
+                        .foregroundColor(.primary)
+                        Spacer()
+                        Text(
+                            String(
+                                format: "%.2f U",
+                                viewModel.todayTotalAmount
+                            )
+                        )
+                        .foregroundColor(.secondary)
                     }
-                }
-                .disabled(viewModel.isRefreshing)
-
-                if let errorMessage = viewModel.refreshErrorMessage {
-                    Text(errorMessage)
-                        .foregroundColor(.red)
+                    Text("Sum of basal, meal bolus, and normal bolus delivered today.")
                         .font(.footnote)
-                }
-            }
-
-            if viewModel.basalDeliveryState != nil {
-                Section(header: Text(LocalizedString("Activity", comment: "Header for activity section"))) {
-                    HStack {
-                        Button {
-                            viewModel.suspendResumeButtonPressed()
-                        } label: {
-                            HStack {
-                                Image(systemName: viewModel.isSuspended ? "play.circle.fill" : "pause.circle.fill")
-                                    .font(.system(size: 22))
-                                    .foregroundColor(viewModel.isSuspended ? .green : .orange)
-                                Text(viewModel.suspendResumeButtonLabel)
-                                    .foregroundColor(viewModel.isSuspended ? .green : .orange)
-                            }
-                        }
-                        .disabled(viewModel.isSuspending)
-                        if viewModel.isSuspending {
-                            Spacer()
-                            ProgressView()
-                        }
-                    }
-                }
-            }
-
-            Section(header: Text("인슐린 전달")) {
-                HStack {
-                    Text("기저 상태")
-                    Spacer()
-                    Text(viewModel.basalStateDescription)
-                }
-
-                HStack {
-                    Text("현재 기저량")
-                    Spacer()
-                    Text(String(format: "%.2f U/h", viewModel.currentBasalRate))
-                        .foregroundColor(.secondary)
-                }
-
-                HStack {
-                    Text("오늘 주입 총량")
-                    Spacer()
-                    Text(String(format: "%.2f U", viewModel.todayTotalAmount))
-                        .foregroundColor(.secondary)
-                }
-
-                HStack {
-                    Text("최대 기저")
-                    Spacer()
-                    Text(String(format: "%.2f U/h", viewModel.maxBasalPerHour))
-                        .foregroundColor(.secondary)
-                }
-
-                HStack {
-                    Text("최대 볼러스")
-                    Spacer()
-                    Text(String(format: "%.1f U", viewModel.maxBolus))
                         .foregroundColor(.secondary)
                 }
             }
 
-            Section(header: Text("디버그")) {
+            // MARK: - Debug
+
+            Section(header: Text("Debug")) {
                 HStack {
-                    Text("펌프 로그")
+                    Text("Pump Log")
                     Spacer()
-                    Text("wrap: \(viewModel.pumpWrapCount) / #\(viewModel.pumpLogNum)")
-                        .foregroundColor(.secondary)
+                    Text(
+                        "wrap: \(viewModel.pumpWrapCount) / #\(viewModel.pumpLogNum)"
+                    )
+                    .foregroundColor(.secondary)
                 }
 
                 HStack {
-                    Text("저장된 로그")
+                    Text("Stored Log")
                     Spacer()
-                    Text("wrap: \(viewModel.storedWrapCount) / #\(viewModel.storedLogNum)")
-                        .foregroundColor(.secondary)
+                    Text(
+                        "wrap: \(viewModel.storedWrapCount) / #\(viewModel.storedLogNum)"
+                    )
+                    .foregroundColor(.secondary)
                 }
 
                 HStack {
-                    Text("저장 로그 번호 변경")
+                    Text("Change Stored Log Number")
                     Spacer()
                     TextField("logNum", text: $viewModel.editStoredLogNum)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 80)
-                    Button("적용") {
+                    Button("Apply") {
                         viewModel.applyStoredLogNum()
                     }
                 }
 
                 HStack {
-                    Text("저장 랩 번호 변경")
+                    Text("Change Stored Wrap Number")
                     Spacer()
-                    TextField("wrap", text: $viewModel.editStoredWrapCount)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: 80)
-                    Button("적용") {
+                    TextField(
+                        "wrap", text: $viewModel.editStoredWrapCount
+                    )
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 80)
+                    Button("Apply") {
                         viewModel.applyStoredWrapCount()
                     }
                 }
-            }
 
-            Section(header: Text(LocalizedString("Configuration", comment: "Configuration section header"))) {
-                NavigationLink(destination: DiaconnBolusSpeedView(
-                    currentSpeed: viewModel.bolusSpeed,
-                    didChange: viewModel.setBolusSpeed
-                )) {
-                    HStack {
-                        Text(LocalizedString("Bolus Speed", comment: "Bolus speed settings label"))
-                        Spacer()
-                        Text(LocalizedString("Speed \(viewModel.bolusSpeed)", comment: "Current bolus speed value"))
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                NavigationLink(destination: DiaconnSoundSettingView(
-                    currentType: viewModel.beepAndAlarm,
-                    currentIntensity: viewModel.alarmIntensity,
-                    didChange: { type, intensity in viewModel.setSoundSetting(type: type, intensity: intensity) }
-                )) {
-                    HStack {
-                        Text(LocalizedString("Alert Type", comment: "Alert type settings label"))
-                        Spacer()
-                        Text(DiaconnAlarmType(rawValue: viewModel.beepAndAlarm)?.title ?? "")
-                            .foregroundColor(.secondary)
-                    }
+                Button(
+                    LocalizedString(
+                        "Test Communication",
+                        comment: "Button to test pump communication"
+                    )
+                ) {
+                    viewModel.testCommunication()
                 }
             }
 
-            Section(header: Text("인슐린 종류")) {
-                NavigationLink(destination: InsulinTypeSetting(
-                    initialValue: viewModel.insulinType,
-                    supportedInsulinTypes: viewModel.allowedInsulinTypes,
-                    allowUnsetInsulinType: false,
-                    didChange: viewModel.didChangeInsulinType
-                ).navigationTitle(LocalizedString("Insulin Type", comment: "Title for insulin type settings"))) {
-                    HStack {
-                        Text(LocalizedString("Insulin Type", comment: "Insulin type settings label"))
-                        Spacer()
-                        Text(viewModel.insulinType?.brandName ?? LocalizedString("Unknown", comment: "Unknown insulin type"))
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
+            // MARK: - Delete Pump
 
             Section {
                 Button(action: {
                     viewModel.deletePump()
                 }) {
-                    Text("펌프 삭제")
-                        .foregroundColor(.red)
+                    Text(
+                        LocalizedString(
+                            "Delete Pump",
+                            comment: "Label for pump deletion button"
+                        )
+                    )
+                    .foregroundColor(.red)
                 }
             }
         }
         .navigationTitle("Diaconn G8")
+    }
+
+    // MARK: - Delivery Status Component
+
+    private var deliveryStatus: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(
+                LocalizedString(
+                    "Insulin Delivery",
+                    comment: "Header for insulin delivery status"
+                )
+            )
+            .foregroundColor(Color(UIColor.secondaryLabel))
+
+            if viewModel.basalDeliveryState == nil {
+                HStack(alignment: .center) {
+                    Image(systemName: "questionmark.circle.fill")
+                        .font(.system(size: 34))
+                        .fixedSize()
+                        .foregroundColor(.secondary)
+                    Text(
+                        LocalizedString(
+                            "Unknown",
+                            comment: "Text shown when delivery status unknown"
+                        )
+                    )
+                    .fontWeight(.bold)
+                    .fixedSize()
+                    .foregroundColor(.secondary)
+                }
+            } else if viewModel.isSuspended {
+                HStack(alignment: .center) {
+                    Image(systemName: "pause.circle.fill")
+                        .font(.system(size: 34))
+                        .fixedSize()
+                        .foregroundColor(.orange)
+                    Text(
+                        LocalizedString(
+                            "Insulin\nSuspended",
+                            comment: "Text shown when insulin suspended"
+                        )
+                    )
+                    .fontWeight(.bold)
+                    .fixedSize()
+                }
+            } else if case let .tempBasal(dose) = viewModel.basalDeliveryState {
+                HStack(alignment: .lastTextBaseline, spacing: 3) {
+                    Text(String(format: "T:%.1f", dose.unitsPerHour))
+                        .font(.system(size: 28))
+                        .fontWeight(.heavy)
+                        .fixedSize()
+                        .foregroundColor(.blue)
+                    Text(
+                        LocalizedString(
+                            "U/hr",
+                            comment: "Units for showing temp basal rate"
+                        )
+                    )
+                    .foregroundColor(.blue)
+                }
+            } else {
+                HStack(alignment: .lastTextBaseline, spacing: 3) {
+                    Text(String(format: "%.2f", viewModel.currentBasalRate))
+                        .font(.system(size: 28))
+                        .fontWeight(.heavy)
+                        .fixedSize()
+                    Text(
+                        LocalizedString(
+                            "U/hr",
+                            comment: "Units for showing basal rate"
+                        )
+                    )
+                    .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: - Reservoir Status Component
+
+    private var reservoirStatus: some View {
+        VStack(alignment: .trailing, spacing: 5) {
+            Text(
+                LocalizedString(
+                    "Insulin Remaining",
+                    comment: "Header for insulin remaining"
+                )
+            )
+            .foregroundColor(Color(UIColor.secondaryLabel))
+
+            HStack(alignment: .lastTextBaseline, spacing: 3) {
+                Text(String(format: "%.0f", viewModel.reservoirLevel))
+                    .font(.system(size: 28))
+                    .fontWeight(.heavy)
+                    .fixedSize()
+                Text(
+                    LocalizedString(
+                        "U", comment: "Insulin unit"
+                    )
+                )
+                .foregroundColor(.secondary)
+            }
+        }
     }
 }
