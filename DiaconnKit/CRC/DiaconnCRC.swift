@@ -1,9 +1,9 @@
 import Foundation
 
-/// 디아콘 G8 CRC-8 체크섬 계산기
-/// AndroidAPS DiaconnG8Packet.kt의 crc_table 기반
+/// Diaconn G8 CRC-8 checksum calculator
+/// Based on AndroidAPS DiaconnG8Packet.kt crc_table
 public enum DiaconnCRC {
-    /// CRC-8 룩업 테이블 (256 엔트리)
+    /// CRC-8 lookup table (256 entries)
     private static let crcTable: [UInt8] = [
         0x00, 0x25, 0x4A, 0x6F, 0x94, 0xB1, 0xDE, 0xFB,
         0x0D, 0x28, 0x47, 0x62, 0x99, 0xBC, 0xD3, 0xF6,
@@ -39,11 +39,11 @@ public enum DiaconnCRC {
         0x9B, 0xBE, 0xD1, 0xF4, 0x0F, 0x2A, 0x45, 0x60
     ]
 
-    /// CRC-8 계산
+    /// Calculate CRC-8
     /// - Parameters:
-    ///   - data: 입력 데이터
-    ///   - length: CRC 계산할 바이트 수 (보통 패킷길이 - 1)
-    /// - Returns: CRC 값
+    ///   - data: input data
+    ///   - length: number of bytes for CRC calculation (usually packet length - 1)
+    /// - Returns: CRC value
     public static func calculate(_ data: Data, length: Int) -> UInt8 {
         var crc: UInt8 = 0
         for i in 0 ..< length {

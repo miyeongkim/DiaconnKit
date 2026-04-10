@@ -1,9 +1,9 @@
 import Foundation
 
-// MARK: - 간식(스낵) 볼루스 주입 (msgType: 0x07)
+// MARK: - Snack bolus injection (msgType: 0x07)
 
-/// 볼루스 주입 명령 생성
-/// - Parameter amount: 인슐린 단위 (예: 2.5U → short값 250)
+/// Generate bolus injection command
+/// - Parameter amount: insulin units (e.g. 2.5U → short value 250)
 func generateBolusPacket(amount: Double) -> Data {
     var payload = Data()
     payload.appendShortLE(UInt16(amount * 100))
@@ -13,10 +13,10 @@ func generateBolusPacket(amount: Double) -> Data {
     )
 }
 
-/// 볼루스 응답 파싱 (msgType: 0x87)
+/// Parse bolus response (msgType: 0x87)
 struct BolusSettingResponse {
-    let result: UInt8 // 0=성공, 기타=에러
-    let otpNumber: UInt32 // OTP 확인 번호
+    let result: UInt8 // 0=success, other=error
+    let otpNumber: UInt32 // OTP confirmation number
 
     var isSuccess: Bool { result == 0 }
 }
@@ -32,24 +32,24 @@ func parseBolusSettingResponse(_ data: Data) -> BolusSettingResponse? {
     )
 }
 
-// MARK: - 확장 볼루스 주입 (msgType: 0x0C)
+// MARK: - Extended bolus injection (msgType: 0x0C)
 
-/// 확장 볼루스 명령 생성
+/// Generate extended bolus command
 /// - Parameters:
-///   - amount: 인슐린 단위
-///   - durationMinutes: 지속 시간 (분)
+///   - amount: insulin units
+///   - durationMinutes: duration (minutes)
 func generateExtendedBolusPacket(amount: Double, durationMinutes: UInt16) -> Data {
     var payload = Data()
     payload.appendShortLE(durationMinutes)
     payload.appendShortLE(UInt16(amount * 100))
-    payload.appendIntLE(UInt32(946_652_400)) // 기준 시간 (2000-01-01)
+    payload.appendIntLE(UInt32(946_652_400)) // Reference time (2000-01-01)
     return DiaconnPacketEncoder.encode(
         msgType: DiaconnPacketType.INJECTION_EXTENDED_BOLUS_SETTING,
         payload: payload
     )
 }
 
-/// 확장 볼루스 응답 파싱 (msgType: 0x8C)
+/// Parse extended bolus response (msgType: 0x8C)
 func parseExtendedBolusSettingResponse(_ data: Data) -> BolusSettingResponse? {
     guard DiaconnPacketDecoder.validatePacket(data) == 0 else { return nil }
     let payload = DiaconnPacketDecoder.getPayload(data)
@@ -61,10 +61,10 @@ func parseExtendedBolusSettingResponse(_ data: Data) -> BolusSettingResponse? {
     )
 }
 
-// MARK: - 주입 취소 (msgType: 0x2B)
+// MARK: - Injection cancel (msgType: 0x2B)
 
-/// 주입 취소 명령 생성
-/// - Parameter reqMsgType: 취소할 명령의 msgType (예: 0x07=볼루스, 0x0C=확장볼루스)
+/// Generate injection cancel command
+/// - Parameter reqMsgType: msgType of command to cancel (e.g. 0x07=bolus, 0x0C=extended bolus)
 func generateInjectionCancelPacket(reqMsgType: UInt8) -> Data {
     var payload = Data()
     payload.append(reqMsgType)
@@ -74,7 +74,7 @@ func generateInjectionCancelPacket(reqMsgType: UInt8) -> Data {
     )
 }
 
-/// 주입 취소 응답 파싱 (msgType: 0xAB)
+/// Parse injection cancel response (msgType: 0xAB)
 func parseInjectionCancelResponse(_ data: Data) -> BolusSettingResponse? {
     guard DiaconnPacketDecoder.validatePacket(data) == 0 else { return nil }
     let payload = DiaconnPacketDecoder.getPayload(data)
@@ -86,9 +86,9 @@ func parseInjectionCancelResponse(_ data: Data) -> BolusSettingResponse? {
     )
 }
 
-// MARK: - 볼루스 속도 설정 (msgType: 0x0E)
+// MARK: - Bolus speed setting (msgType: 0x0E)
 
-/// 볼루스 속도 설정 (1~8)
+/// Bolus speed setting (1~8)
 func generateBolusSpeedPacket(speed: UInt8) -> Data {
     var payload = Data()
     payload.append(speed)
@@ -98,8 +98,8 @@ func generateBolusSpeedPacket(speed: UInt8) -> Data {
     )
 }
 
-/// 볼루스 속도 설정 응답 (msgType: 0x85)
-/// 응답 포맷: 주입속도(1byte, 1~8) + 1회용 토큰키(4bytes, 6자리 Random)
+/// Bolus speed setting response (msgType: 0x85)
+/// Response format: injection speed(1byte, 1~8) + one-time token(4bytes, 6-digit random)
 struct BolusSpeedSettingResponse {
     let speed: UInt8
     let token: UInt32
@@ -116,14 +116,14 @@ func parseBolusSpeedSettingResponse(_ data: Data) -> BolusSpeedSettingResponse? 
     )
 }
 
-// MARK: - OTP 확인 (msgType: 0x2A) — 2단계 커밋
+// MARK: - OTP confirm (msgType: 0x2A) — two-step commit
 
-/// 설정 명령 확인 (OTP 번호로 커밋)
-/// 모든 설정 명령(볼루스, 임시기저, 기저프로파일 등)은 응답에서 otpNumber를 받고,
-/// 이 패킷으로 확인해야 실제 실행됨
+/// Confirm setting command (commit with OTP number)
+/// All setting commands (bolus, temp basal, basal profile, etc.) receive otpNumber in response,
+/// and must be confirmed with this packet for actual execution
 /// - Parameters:
-///   - reqMsgType: 원래 명령의 msgType
-///   - otpNumber: 응답에서 받은 OTP 번호
+///   - reqMsgType: msgType of the original command
+///   - otpNumber: OTP number received from the response
 func generateAppConfirmPacket(reqMsgType: UInt8, otpNumber: UInt32) -> Data {
     var payload = Data()
     payload.append(reqMsgType)
@@ -134,7 +134,7 @@ func generateAppConfirmPacket(reqMsgType: UInt8, otpNumber: UInt32) -> Data {
     )
 }
 
-/// 앱 취소 (msgType: 0x29) — OTP 커밋 거부
+/// App cancel (msgType: 0x29) — reject OTP commit
 func generateAppCancelPacket(reqMsgType: UInt8, otpNumber: UInt32) -> Data {
     var payload = Data()
     payload.append(reqMsgType)

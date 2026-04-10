@@ -7,7 +7,7 @@ struct DiaconnScanView: View {
     var body: some View {
         VStack(spacing: 16) {
             if viewModel.isScanning {
-                ProgressView("Diaconn G8을 검색 중...")
+                ProgressView("Searching for Diaconn G8...")
                     .padding()
             }
 
@@ -29,7 +29,7 @@ struct DiaconnScanView: View {
             }
 
             if viewModel.isConnecting {
-                ProgressView("연결 중...")
+                ProgressView("Connecting...")
                     .padding()
             }
 
@@ -39,7 +39,7 @@ struct DiaconnScanView: View {
                     .padding()
             }
         }
-        .navigationTitle("펌프 검색")
+        .navigationTitle("Pump Search")
         .onAppear {
             viewModel.startScanning()
         }

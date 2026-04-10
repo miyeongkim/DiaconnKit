@@ -12,11 +12,11 @@ struct DiaconnSetupCompleteView: View {
                 .frame(width: 80, height: 80)
                 .foregroundColor(.green)
 
-            Text("설정 완료")
+            Text("Setup Complete")
                 .font(.largeTitle)
                 .fontWeight(.bold)
 
-            Text("Diaconn G8 펌프가 성공적으로 연결되었습니다.\n\nTrio가 자동으로 인슐린 전달을 관리합니다.")
+            Text("The Diaconn G8 pump has been successfully connected.\n\nTrio will automatically manage insulin delivery.")
                 .font(.body)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
@@ -24,7 +24,7 @@ struct DiaconnSetupCompleteView: View {
             Spacer()
 
             Button(action: finish) {
-                Text("완료")
+                Text("Done")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -35,6 +35,6 @@ struct DiaconnSetupCompleteView: View {
             .padding(.horizontal, 32)
             .padding(.bottom, 32)
         }
-        .navigationTitle("설정 완료")
+        .navigationTitle("Setup Complete")
     }
 }

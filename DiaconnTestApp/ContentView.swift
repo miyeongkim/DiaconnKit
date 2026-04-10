@@ -9,23 +9,23 @@ class TestAppState: ObservableObject {
 
     let pumpManager: DiaconnPumpManager
 
-    // 패킷 인스펙터
+    // Packet inspector
     @Published var lastPacket: PacketInspection?
 
-    // 로그 조회
+    // Log inquiry
     @Published var logRawResponse: Data?
     @Published var logEntries: [DiaconnLogEntry] = []
     @Published var logFetchError: String?
 
-    // 볼루스
+    // Bolus
     @Published var bolusResult: String?
     @Published var bolusError: String?
 
-    // 임시 기저
+    // Temp basal
     @Published var tempBasalResult: String?
     @Published var tempBasalError: String?
 
-    // 동기화
+    // Sync
     @Published var reconcileEntries: [DoseEntry] = []
     @Published var reconcileError: String?
 
@@ -96,7 +96,7 @@ class TestAppState: ObservableObject {
                 if let error = error {
                     self?.bolusError = error.localizedDescription
                 } else {
-                    self?.bolusResult = "볼루스 \(String(format: "%.2f", units))U 주입 시작"
+                    self?.bolusResult = "Bolus \(String(format: "%.2f", units))U delivery started"
                 }
             }
         }
@@ -109,7 +109,7 @@ class TestAppState: ObservableObject {
             DispatchQueue.main.async {
                 switch result {
                 case .success:
-                    self?.bolusResult = "볼루스 취소 완료"
+                    self?.bolusResult = "Bolus canceled"
                 case let .failure(error):
                     self?.bolusError = error.localizedDescription
                 }
@@ -125,7 +125,7 @@ class TestAppState: ObservableObject {
                 if let error = error {
                     self?.tempBasalError = error.localizedDescription
                 } else {
-                    self?.tempBasalResult = "임시 기저 \(String(format: "%.2f", unitsPerHour))U/h × \(Int(durationMin))분 설정"
+                    self?.tempBasalResult = "Temp basal \(String(format: "%.2f", unitsPerHour))U/h x \(Int(durationMin))min set"
                 }
             }
         }
@@ -139,7 +139,7 @@ class TestAppState: ObservableObject {
                 if let error = error {
                     self?.tempBasalError = error.localizedDescription
                 } else {
-                    self?.tempBasalResult = "임시 기저 취소 완료"
+                    self?.tempBasalResult = "Temp basal canceled"
                 }
             }
         }
@@ -153,7 +153,7 @@ class TestAppState: ObservableObject {
                 if let error = error {
                     self?.tempBasalError = error.localizedDescription
                 } else {
-                    self?.tempBasalResult = "펌프 일시정지 완료"
+                    self?.tempBasalResult = "Pump suspended"
                 }
             }
         }
@@ -167,7 +167,7 @@ class TestAppState: ObservableObject {
                 if let error = error {
                     self?.tempBasalError = error.localizedDescription
                 } else {
-                    self?.tempBasalResult = "펌프 재개 완료"
+                    self?.tempBasalResult = "Pump resumed"
                 }
             }
         }
@@ -219,26 +219,26 @@ struct MenuView: View {
                 statusRow
             }
 
-            Section("진단") {
-                NavigationLink("펌프 상태") {
+            Section("Diagnostics") {
+                NavigationLink("Pump Status") {
                     PumpStatusView(appState: appState)
                 }
-                NavigationLink("패킷 인스펙터") {
+                NavigationLink("Packet Inspector") {
                     PacketInspectorView(appState: appState)
                 }
-                NavigationLink("로그 조회") {
+                NavigationLink("Log Inquiry") {
                     LogFetchView(appState: appState)
                 }
             }
 
-            Section("제어") {
-                NavigationLink("볼루스") {
+            Section("Control") {
+                NavigationLink("Bolus") {
                     BolusView(appState: appState)
                 }
-                NavigationLink("임시 기저") {
+                NavigationLink("Temp Basal") {
                     TempBasalView(appState: appState)
                 }
-                NavigationLink("동기화 (reconcileDoses)") {
+                NavigationLink("Sync (reconcileDoses)") {
                     ReconcileView(appState: appState)
                 }
             }
@@ -247,7 +247,7 @@ struct MenuView: View {
                 Button(role: .destructive) {
                     appState.onDisconnected()
                 } label: {
-                    Label("연결 해제", systemImage: "antenna.radiowaves.left.and.right.slash")
+                    Label("Disconnect", systemImage: "antenna.radiowaves.left.and.right.slash")
                 }
             }
         }
@@ -257,7 +257,7 @@ struct MenuView: View {
     private var statusRow: some View {
         HStack {
             Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
-            Text("연결됨")
+            Text("Connected")
             Spacer()
             Button("Fetch") {
                 appState.pumpManager.fetchPumpStatus { _ in }
@@ -276,28 +276,28 @@ struct PumpStatusView: View {
 
     var body: some View {
         List {
-            Section("인슐린 / 배터리") {
-                row("잔여 인슐린", String(format: "%.2f U", state.reservoirLevel))
-                row("배터리", "\(Int(state.batteryRemaining * 100))%")
+            Section("Insulin / Battery") {
+                row("Remaining Insulin", String(format: "%.2f U", state.reservoirLevel))
+                row("Battery", "\(Int(state.batteryRemaining * 100))%")
             }
-            Section("상태") {
-                row("일시정지", state.isPumpSuspended ? "정지 중" : "정상")
-                row("임시 기저", state.isTempBasalInProgress ? "진행 중" : "없음")
-                row("볼루스 상태", bolusStateLabel)
+            Section("Status") {
+                row("Suspended", state.isPumpSuspended ? "Suspended" : "Normal")
+                row("Temp Basal", state.isTempBasalInProgress ? "In Progress" : "None")
+                row("Bolus State", bolusStateLabel)
             }
-            Section("로그 커서") {
+            Section("Log Cursor") {
                 row("pumpLastLogNum", "\(state.pumpLastLogNum)")
                 row("pumpWrappingCount", "\(state.pumpWrappingCount)")
                 row("storedLastLogNum", "\(state.storedLastLogNum)")
                 row("storedWrappingCount", "\(state.storedWrappingCount)")
                 row("isFirstLogSync", "\(state.isFirstLogSync)")
             }
-            Section("펌프 정보") {
-                row("펌웨어", state.firmwareVersion ?? "-")
-                row("시리얼", state.serialNumber ?? "-")
+            Section("Pump Info") {
+                row("Firmware", state.firmwareVersion ?? "-")
+                row("Serial", state.serialNumber ?? "-")
             }
         }
-        .navigationTitle("펌프 상태")
+        .navigationTitle("Pump Status")
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button("Fetch") { appState.pumpManager.fetchPumpStatus { _ in } }
@@ -307,10 +307,10 @@ struct PumpStatusView: View {
 
     private var bolusStateLabel: String {
         switch appState.pumpManager.state.bolusState {
-        case .noBolus: return "없음"
-        case .initiating: return "시작 중"
-        case .inProgress: return "주입 중"
-        case .canceling: return "취소 중"
+        case .noBolus: return "None"
+        case .initiating: return "Initiating"
+        case .inProgress: return "In Progress"
+        case .canceling: return "Canceling"
         }
     }
 
@@ -332,7 +332,7 @@ struct PacketInspectorView: View {
     var body: some View {
         VStack(spacing: 0) {
             Button(action: { appState.pumpManager.fetchPumpStatus { _ in } }) {
-                Label("BigAPSMainInfoInquire (0x54) 요청", systemImage: "arrow.up.circle")
+                Label("BigAPSMainInfoInquire (0x54) Request", systemImage: "arrow.up.circle")
                     .frame(maxWidth: .infinity).padding(10)
             }
             .buttonStyle(.borderedProminent)
@@ -341,7 +341,7 @@ struct PacketInspectorView: View {
             if let p = appState.lastPacket {
                 Picker("", selection: $tab) {
                     Text("Hex Dump").tag(0)
-                    Text("파싱 결과").tag(1)
+                    Text("Parsed Result").tag(1)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
@@ -355,11 +355,11 @@ struct PacketInspectorView: View {
                 }
             } else {
                 Spacer()
-                Text("버튼을 눌러 데이터를 수신하세요").foregroundColor(.secondary)
+                Text("Press button to receive data").foregroundColor(.secondary)
                 Spacer()
             }
         }
-        .navigationTitle("패킷 인스펙터")
+        .navigationTitle("Packet Inspector")
     }
 }
 
@@ -374,7 +374,7 @@ struct LogFetchView: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                Section("요청 파라미터") {
+                Section("Request Parameters") {
                     HStack {
                         Text("wrapCount").foregroundColor(.secondary)
                         Spacer()
@@ -385,7 +385,7 @@ struct LogFetchView: View {
                         Spacer()
                         TextField("0", text: $logNumText).keyboardType(.numberPad).multilineTextAlignment(.trailing)
                     }
-                    Button("BIG_LOG_INQUIRE (0x72) 요청") { sendFetch() }
+                    Button("BIG_LOG_INQUIRE (0x72) Request") { sendFetch() }
                         .frame(maxWidth: .infinity)
                 }
                 if let err = appState.logFetchError {
@@ -397,7 +397,7 @@ struct LogFetchView: View {
             if appState.logRawResponse != nil {
                 Picker("", selection: $tab) {
                     Text("Hex Dump").tag(0)
-                    Text("파싱 결과 (\(appState.logEntries.count)건)").tag(1)
+                    Text("Parsed (\(appState.logEntries.count) entries)").tag(1)
                 }
                 .pickerStyle(.segmented)
                 .padding()
@@ -411,11 +411,11 @@ struct LogFetchView: View {
                 }
             } else {
                 Spacer()
-                Text("버튼을 눌러 로그를 수신하세요").foregroundColor(.secondary)
+                Text("Press button to receive logs").foregroundColor(.secondary)
                 Spacer()
             }
         }
-        .navigationTitle("로그 조회")
+        .navigationTitle("Log Inquiry")
         .onAppear {
             wrapCountText = "\(appState.pumpManager.state.storedWrappingCount)"
             logNumText = "\(appState.pumpManager.state.storedLastLogNum)"
@@ -435,20 +435,20 @@ struct BolusView: View {
 
     var body: some View {
         Form {
-            Section("볼루스 주입") {
+            Section("Bolus Delivery") {
                 HStack {
-                    Text("용량").foregroundColor(.secondary)
+                    Text("Amount").foregroundColor(.secondary)
                     Spacer()
                     TextField("1.0", text: $unitsText).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
                     Text("U").foregroundColor(.secondary)
                 }
-                Button("주입 시작") {
+                Button("Start Delivery") {
                     guard let u = Double(unitsText) else { return }
                     appState.enactBolus(units: u)
                 }
                 .frame(maxWidth: .infinity)
 
-                Button("주입 취소", role: .destructive) {
+                Button("Cancel Delivery", role: .destructive) {
                     appState.cancelBolus()
                 }
                 .frame(maxWidth: .infinity)
@@ -456,24 +456,24 @@ struct BolusView: View {
 
             resultSection(result: appState.bolusResult, error: appState.bolusError)
 
-            Section("현재 상태") {
-                stateRow("볼루스 상태", bolusStateLabel)
+            Section("Current Status") {
+                stateRow("Bolus State", bolusStateLabel)
                 if let delivered = appState.pumpManager.state.deliveredUnits,
                    let total = appState.pumpManager.state.totalUnits
                 {
-                    stateRow("주입 진행", String(format: "%.2f / %.2f U", delivered, total))
+                    stateRow("Delivery Progress", String(format: "%.2f / %.2f U", delivered, total))
                 }
             }
         }
-        .navigationTitle("볼루스")
+        .navigationTitle("Bolus")
     }
 
     private var bolusStateLabel: String {
         switch appState.pumpManager.state.bolusState {
-        case .noBolus: return "없음"
-        case .initiating: return "시작 중"
-        case .inProgress: return "주입 중"
-        case .canceling: return "취소 중"
+        case .noBolus: return "None"
+        case .initiating: return "Initiating"
+        case .inProgress: return "In Progress"
+        case .canceling: return "Canceling"
         }
     }
 }
@@ -487,49 +487,49 @@ struct TempBasalView: View {
 
     var body: some View {
         Form {
-            Section("임시 기저 설정") {
+            Section("Temp Basal Settings") {
                 HStack {
-                    Text("속도").foregroundColor(.secondary)
+                    Text("Rate").foregroundColor(.secondary)
                     Spacer()
                     TextField("0.5", text: $rateText).keyboardType(.decimalPad).multilineTextAlignment(.trailing)
                     Text("U/h").foregroundColor(.secondary)
                 }
                 HStack {
-                    Text("시간").foregroundColor(.secondary)
+                    Text("Duration").foregroundColor(.secondary)
                     Spacer()
                     TextField("30", text: $durationText).keyboardType(.numberPad).multilineTextAlignment(.trailing)
-                    Text("분").foregroundColor(.secondary)
+                    Text("min").foregroundColor(.secondary)
                 }
-                Button("임시 기저 설정") {
+                Button("Set Temp Basal") {
                     guard let r = Double(rateText), let d = Double(durationText) else { return }
                     appState.enactTempBasal(unitsPerHour: r, durationMin: d)
                 }
                 .frame(maxWidth: .infinity)
 
-                Button("임시 기저 취소", role: .destructive) {
+                Button("Cancel Temp Basal", role: .destructive) {
                     appState.cancelTempBasal()
                 }
                 .frame(maxWidth: .infinity)
             }
 
-            Section("펌프 일시정지 / 재개") {
-                Button("일시정지") { appState.suspendDelivery() }
+            Section("Pump Suspend / Resume") {
+                Button("Suspend") { appState.suspendDelivery() }
                     .frame(maxWidth: .infinity)
-                Button("재개", role: .destructive) { appState.resumeDelivery() }
+                Button("Resume", role: .destructive) { appState.resumeDelivery() }
                     .frame(maxWidth: .infinity)
             }
 
             resultSection(result: appState.tempBasalResult, error: appState.tempBasalError)
 
-            Section("현재 상태") {
-                stateRow("일시정지", appState.pumpManager.state.isPumpSuspended ? "정지 중" : "정상")
-                stateRow("임시 기저", appState.pumpManager.state.isTempBasalInProgress ? "진행 중" : "없음")
+            Section("Current Status") {
+                stateRow("Suspended", appState.pumpManager.state.isPumpSuspended ? "Suspended" : "Normal")
+                stateRow("Temp Basal", appState.pumpManager.state.isTempBasalInProgress ? "In Progress" : "None")
                 if let rate = appState.pumpManager.state.tempBasalUnits {
-                    stateRow("속도", String(format: "%.2f U/h", rate))
+                    stateRow("Rate", String(format: "%.2f U/h", rate))
                 }
             }
         }
-        .navigationTitle("임시 기저")
+        .navigationTitle("Temp Basal")
     }
 }
 
@@ -542,7 +542,7 @@ struct ReconcileView: View {
         VStack(spacing: 0) {
             Form {
                 Section {
-                    Button("reconcileDoses 실행") { appState.reconcileDoses() }
+                    Button("Run reconcileDoses") { appState.reconcileDoses() }
                         .frame(maxWidth: .infinity)
                 }
                 if let err = appState.reconcileError {
@@ -553,11 +553,11 @@ struct ReconcileView: View {
 
             if appState.reconcileEntries.isEmpty && appState.reconcileError == nil {
                 Spacer()
-                Text("버튼을 눌러 동기화를 실행하세요").foregroundColor(.secondary)
+                Text("Press button to run sync").foregroundColor(.secondary)
                 Spacer()
             } else {
                 List {
-                    Section("DoseEntry (\(appState.reconcileEntries.count)건)") {
+                    Section("DoseEntry (\(appState.reconcileEntries.count) entries)") {
                         ForEach(appState.reconcileEntries.indices, id: \.self) { i in
                             DoseEntryRow(dose: appState.reconcileEntries[i])
                         }
@@ -565,7 +565,7 @@ struct ReconcileView: View {
                 }
             }
         }
-        .navigationTitle("동기화")
+        .navigationTitle("Sync")
     }
 }
 
@@ -593,11 +593,11 @@ struct DoseEntryRow: View {
 
     private var typeLabel: String {
         switch dose.type {
-        case .bolus: return "볼루스"
-        case .tempBasal: return "임시 기저"
-        case .basal: return "기저"
-        case .suspend: return "일시정지"
-        case .resume: return "재개"
+        case .bolus: return "Bolus"
+        case .tempBasal: return "Temp Basal"
+        case .basal: return "Basal"
+        case .suspend: return "Suspend"
+        case .resume: return "Resume"
         default: return "\(dose.type)"
         }
     }
@@ -615,13 +615,13 @@ struct DoseEntryRow: View {
 
 @ViewBuilder func resultSection(result: String?, error: String?) -> some View {
     if let result = result {
-        Section("결과") {
+        Section("Result") {
             Label(result, systemImage: "checkmark.circle.fill")
                 .foregroundColor(.green)
         }
     }
     if let error = error {
-        Section("오류") {
+        Section("Error") {
             Label(error, systemImage: "xmark.circle.fill")
                 .foregroundColor(.red)
                 .font(.caption)
@@ -646,7 +646,7 @@ struct LogEntryListView: View {
         if entries.isEmpty {
             VStack {
                 Spacer()
-                Text("파싱된 항목 없음\n(응답이 패딩이거나 빈 로그)")
+                Text("No parsed entries\n(response is padding or empty log)")
                     .multilineTextAlignment(.center).foregroundColor(.secondary)
                 Spacer()
             }
@@ -681,9 +681,9 @@ struct LogEntryRow: View {
                 Text(Self.fmt.string(from: entry.date)).font(.system(size: 12, design: .monospaced)).foregroundColor(.secondary)
             }
             HStack(spacing: 16) {
-                if entry.amount > 0 { chip("용량", String(format: "%.2f U", entry.amount)) }
-                if entry.rate > 0 { chip("비율", String(format: "%.2f", entry.rate)) }
-                if entry.durationMin > 0 { chip("지속", "\(entry.durationMin)분") }
+                if entry.amount > 0 { chip("Amount", String(format: "%.2f U", entry.amount)) }
+                if entry.rate > 0 { chip("Rate", String(format: "%.2f", entry.rate)) }
+                if entry.durationMin > 0 { chip("Duration", "\(entry.durationMin)min") }
             }
             .font(.caption)
         }
@@ -692,17 +692,17 @@ struct LogEntryRow: View {
 
     private var kindLabel: String {
         switch entry.logKind {
-        case .mealBolus: return "식사 볼루스"
-        case .snackBolus: return "간식 볼루스"
-        case .squareBolus: return "확장 볼루스"
-        case .dualBolus: return "듀얼 볼루스"
-        case .basalChange: return "기저 변경"
-        case .tempBasalStart: return "임시기저 시작"
-        case .tempBasalEnd: return "임시기저 종료"
-        case .suspend: return "일시정지"
-        case .resume: return "재개"
-        case .alarm: return "알람"
-        case .unknown: return "알 수 없음"
+        case .mealBolus: return "Meal Bolus"
+        case .snackBolus: return "Snack Bolus"
+        case .squareBolus: return "Extended Bolus"
+        case .dualBolus: return "Dual Bolus"
+        case .basalChange: return "Basal Change"
+        case .tempBasalStart: return "Temp Basal Start"
+        case .tempBasalEnd: return "Temp Basal End"
+        case .suspend: return "Suspend"
+        case .resume: return "Resume"
+        case .alarm: return "Alarm"
+        case .unknown: return "Unknown"
         }
     }
 
@@ -730,7 +730,7 @@ struct HexDumpView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
                 Group {
-                    summaryRow("크기", "\(raw.count) bytes")
+                    summaryRow("Size", "\(raw.count) bytes")
                     if raw.count > 1 { summaryRow("msgType", String(format: "0x%02X", raw[1])) }
                     let defect = DiaconnPacketDecoder.validatePacket(raw)
                     summaryRow("CRC", defect == 0 ? "✅ OK" : "❌ FAIL (\(defect))")
@@ -744,7 +744,7 @@ struct HexDumpView: View {
                 Divider().padding(.vertical, 6)
 
                 HStack(spacing: 12) {
-                    legend(.blue, "헤더 [0-3]")
+                    legend(.blue, "Header [0-3]")
                     legend(.primary, "payload")
                     legend(.orange, "CRC")
                 }
@@ -798,29 +798,29 @@ struct ParsedView: View {
         } else if let s = packet.parsed {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    section("기본 상태") {
-                        row("리저버", String(format: "%.2f U", s.remainInsulin))
-                        row("배터리", "\(s.remainBattery) %")
-                        row("일시정지", s.isSuspended ? "정지" : "정상")
-                        row("펌웨어", s.firmwareVersion)
-                        row("시리얼", s.serialNumber)
+                    section("Basic Status") {
+                        row("Reservoir", String(format: "%.2f U", s.remainInsulin))
+                        row("Battery", "\(s.remainBattery) %")
+                        row("Suspended", s.isSuspended ? "Suspended" : "Normal")
+                        row("Firmware", s.firmwareVersion)
+                        row("Serial", s.serialNumber)
                     }
-                    section("로그 상태") {
+                    section("Log Status") {
                         row("lastLogNum", "\(s.lastLogNum)")
                         row("wrappingCount", "\(s.wrappingCount)")
                     }
-                    section("기저") {
-                        row("기저량", String(format: "%.2f U/h", s.basalAmount))
-                        row("임시기저 상태", "\(s.tempBasalStatus)")
-                        row("임시기저 비율", "\(s.tempBasalRateRatio) %")
-                        row("경과시간", "\(s.tempBasalElapsedTime) min")
+                    section("Basal") {
+                        row("Basal Rate", String(format: "%.2f U/h", s.basalAmount))
+                        row("Temp Basal Status", "\(s.tempBasalStatus)")
+                        row("Temp Basal Ratio", "\(s.tempBasalRateRatio) %")
+                        row("Elapsed Time", "\(s.tempBasalElapsedTime) min")
                     }
-                    section("한도") {
-                        row("최대 기저/h", String(format: "%.2f U/h", s.maxBasalPerHour))
-                        row("최대 볼루스", String(format: "%.2f U", s.maxBolus))
+                    section("Limits") {
+                        row("Max Basal/h", String(format: "%.2f U/h", s.maxBasalPerHour))
+                        row("Max Bolus", String(format: "%.2f U", s.maxBolus))
                     }
-                    section("펌프 시간") {
-                        row("시간", String(
+                    section("Pump Time") {
+                        row("Time", String(
                             format: "%d-%02d-%02d %02d:%02d:%02d",
                             s.pumpYear,
                             s.pumpMonth,
@@ -836,7 +836,7 @@ struct ParsedView: View {
             VStack {
                 Spacer()
                 Image(systemName: "xmark.circle").font(.largeTitle).foregroundColor(.red)
-                Text("파싱 실패").foregroundColor(.secondary)
+                Text("Parse Failed").foregroundColor(.secondary)
                 Spacer()
             }
         }

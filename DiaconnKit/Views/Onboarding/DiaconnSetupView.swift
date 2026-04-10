@@ -16,7 +16,7 @@ struct DiaconnSetupView: View {
                 .font(.largeTitle)
                 .fontWeight(.bold)
 
-            Text("Diaconn G8 인슐린 펌프를 Trio에 연결합니다.\n\n펌프가 가까이 있고 블루투스가 켜져 있는지 확인해 주세요.")
+            Text("Connect the Diaconn G8 insulin pump to Trio.\n\nMake sure the pump is nearby and Bluetooth is turned on.")
                 .font(.body)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
@@ -24,7 +24,7 @@ struct DiaconnSetupView: View {
             Spacer()
 
             Button(action: nextAction) {
-                Text("다음")
+                Text("Next")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -35,6 +35,6 @@ struct DiaconnSetupView: View {
             .padding(.horizontal, 32)
             .padding(.bottom, 32)
         }
-        .navigationTitle("펌프 설정")
+        .navigationTitle("Pump Setup")
     }
 }
