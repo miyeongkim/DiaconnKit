@@ -1,17 +1,17 @@
 {
   "images" : [
     {
-      "filename" : "diaconn_g8.jpg",
+      "filename" : "diaconn_g8.png",
       "idiom" : "universal",
       "scale" : "1x"
     },
     {
-      "filename" : "diaconn_g8.jpg",
+      "filename" : "diaconn_g8.png",
       "idiom" : "universal",
       "scale" : "2x"
     },
     {
-      "filename" : "diaconn_g8.jpg",
+      "filename" : "diaconn_g8.png",
       "idiom" : "universal",
       "scale" : "3x"
     }
