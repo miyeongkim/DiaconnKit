@@ -32,6 +32,7 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
     let stateObservers = WeakSynchronizedSet<DiaconnStateObserver>()
 
     private var doseReporter: DiaconnDoseProgressReporter?
+    public internal(set) var activeAlert: DiaconnPumpManagerAlert?
 
     private let log = DiaconnLogger(category: "DiaconnPumpManager")
     private let pumpQueue = DispatchQueue(label: "com.diaconkit.pumpmanager", qos: .userInitiated)
@@ -75,7 +76,7 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
 
     public var status: PumpManagerStatus {
         PumpManagerStatus(
-            timeZone: TimeZone.current,
+            timeZone: state.pumpTimeZone,
             device: device,
             pumpBatteryChargeRemaining: state.batteryRemaining,
             basalDeliveryState: state.basalDeliveryState,
@@ -91,7 +92,7 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
         case .initiating:
             return .initiating
         case .inProgress:
-            // DoseEntry 대신 현재 볼루스 정보로 생성
+            // Create from current bolus info instead of DoseEntry
             let dose = DoseEntry(
                 type: .bolus,
                 startDate: state.lastBolusDate ?? Date(),
@@ -189,11 +190,12 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
     public func notifyStateDidChange() {
         let newState = state
         let old = oldState
-        oldState = DiaconnPumpManagerState(rawValue: newState.rawValue)
+        guard newState != old else { return }
+        oldState = newState
 
         let status = self.status
         let oldStatus = PumpManagerStatus(
-            timeZone: TimeZone.current,
+            timeZone: old.pumpTimeZone,
             device: device,
             pumpBatteryChargeRemaining: old.batteryRemaining,
             basalDeliveryState: old.basalDeliveryState,
@@ -231,10 +233,10 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
         }
     }
 
-    // MARK: - 2단계 커밋 (OTP 확인)
+    // MARK: - Two-step commit (OTP confirm)
 
-    /// 설정 명령 후 OTP 확인 전송 + 펌프의 0xAA 응답 대기
-    /// 응답을 소비하지 않으면 다음 sendPacket이 0xAA를 잘못 수신함
+    /// Send OTP confirm after setting command + wait for pump's 0xAA response
+    /// If response is not consumed, next sendPacket may incorrectly receive 0xAA
     private func confirmSettingCommand(reqMsgType: UInt8, otpNumber: UInt32) throws {
         let confirmPacket = generateAppConfirmPacket(reqMsgType: reqMsgType, otpNumber: otpNumber)
         log.info("OTP confirm sending: reqMsgType=0x\(String(format: "%02X", reqMsgType)) otp=\(otpNumber)")
@@ -244,7 +246,7 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
             throw DiaconnPumpManagerError.communicationFailure
         }
 
-        // 0xAA 응답 확인
+        // Verify 0xAA response
         let msgType = responseData.count > 1 ? responseData[1] : 0
         let resultByte = responseData.count > 4 ? responseData[4] : 0xFF
         log
@@ -258,9 +260,58 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
         }
     }
 
-    // MARK: - 펌프 상태 조회
+    // MARK: - Time Synchronization
 
-    /// BigAPSMainInfoInquire (0x54) → 182바이트 응답으로 전체 상태 업데이트
+    /// Check if time sync is needed (>60s drift, skip only during bolus)
+    private func shouldSyncTime() -> Bool {
+        guard state.bolusState == .noBolus else { return false }
+        return isClockOffset
+    }
+
+    /// Sync pump clock to current system time (skip only during bolus)
+    public func syncTime(completion: @escaping (Error?) -> Void) {
+        pumpQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            guard self.state.bolusState == .noBolus else {
+                self.log.info("syncTime skipped: bolus in progress")
+                completion(nil) // Not an error, just skip
+                return
+            }
+
+            do {
+                let packet = generateTimeSettingPacket(date: Date())
+                self.log.info("syncTime: sending TIME_SETTING (0x0F)")
+
+                guard let responseData = try self.bluetooth.writeAndWait(packet: packet) else {
+                    throw DiaconnPumpManagerError.communicationFailure
+                }
+
+                guard let response = parseTimeSettingResponse(responseData), response.isSuccess else {
+                    throw DiaconnPumpManagerError.communicationFailure
+                }
+
+                try self.confirmSettingCommand(
+                    reqMsgType: DiaconnPacketType.TIME_SETTING,
+                    otpNumber: response.otpNumber
+                )
+
+                self.state.pumpTime = Date()
+                self.state.pumpTimeSyncedAt = Date()
+                self.state.pumpTimeZone = TimeZone.current
+                self.notifyStateDidChange()
+                self.log.info("syncTime: success")
+                completion(nil)
+            } catch {
+                self.log.error("syncTime failed: \(error)")
+                completion(error)
+            }
+        }
+    }
+
+    // MARK: - Pump status inquiry
+
+    /// BigAPSMainInfoInquire (0x54) → update full status from 182-byte response
     func fetchPumpStatus(completion: @escaping (Result<DiaconnPumpStatus, Error>) -> Void) {
         pumpQueue.async { [weak self] in
             guard let self = self else { return }
@@ -268,7 +319,7 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
             do {
                 self.log.info("[fetchPumpStatus] Sending BigAPSMainInfoInquire (0x54)...")
 
-                // 요청은 표준 20바이트 패킷, 응답은 182바이트 대량 패킷
+                // Request is standard 20-byte packet, response is 182-byte big packet
                 guard let responseData = try self.bluetooth.sendPacket(
                     msgType: DiaconnPacketType.BIG_APS_MAIN_INFO_INQUIRE,
                     timeout: 15.0
@@ -280,11 +331,11 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
 
                 self.log.info("[fetchPumpStatus] Response received: \(responseData.count) bytes")
 
-                // 헤더 + 앞 16바이트 로그 (os_log 길이 제한 고려)
+                // Header + first 16 bytes log (considering os_log length limit)
                 let headerHex = responseData.prefix(16).map { String(format: "%02X", $0) }.joined(separator: " ")
                 self.log.info("[fetchPumpStatus] Header[0..15]: \(headerHex)")
 
-                // 응답 첫 바이트(SOP) 및 msgType 확인
+                // Check first byte (SOP) and msgType of response
                 if responseData.count >= 2 {
                     let sop = responseData[0]
                     let msgType = responseData[1]
@@ -294,13 +345,13 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
                         )
                 }
 
-                // result 바이트 (offset 4) 확인
+                // Check result byte (offset 4)
                 if responseData.count > 4 {
                     let resultByte = responseData[4]
                     self.log.info("[fetchPumpStatus] result byte=\(resultByte) (expected 16=success)")
                 }
 
-                // 리저브/배터리 원시값 (offset 5~7)
+                // Reservoir/battery raw values (offset 5~7)
                 if responseData.count > 7 {
                     let rawReservoir = UInt16(responseData[5]) | (UInt16(responseData[6]) << 8)
                     let rawBattery = responseData[7]
@@ -312,7 +363,7 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
 
                 guard let pumpStatus = parseBigAPSMainInfoResponse(responseData) else {
                     self.log.error("[fetchPumpStatus] parseBigAPSMainInfoResponse returned nil — validate/parse failed")
-                    // CRC 검증 결과 로그
+                    // CRC validation result log
                     let defect = DiaconnPacketDecoder.validatePacket(responseData)
                     self.log.error("[fetchPumpStatus] validatePacket defect=\(defect) (0=ok, 97=len, 98=sop, 99=crc)")
                     completion(.failure(DiaconnPumpManagerError.communicationFailure))
@@ -324,10 +375,12 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
                 self.log.info("  remainBattery=\(pumpStatus.remainBattery)%")
                 self.log
                     .info(
-                        "  basePauseStatus=\(pumpStatus.basePauseStatus) (1=정지됨, 2=해제/동작중) isSuspended=\(pumpStatus.isSuspended)"
+                        "  basePauseStatus=\(pumpStatus.basePauseStatus) (1=paused, 2=released/active) isSuspended=\(pumpStatus.isSuspended)"
                     )
                 self.log
-                    .info("  tbStatus=\(pumpStatus.tbStatus) (1=임시기저중, 2=해제) isTempBasalRunning=\(pumpStatus.isTempBasalRunning)")
+                    .info(
+                        "  tbStatus=\(pumpStatus.tbStatus) (1=temp basal running, 2=released) isTempBasalRunning=\(pumpStatus.isTempBasalRunning)"
+                    )
                 self.log.info("  tempBasalStatus=\(pumpStatus.tempBasalStatus) (0=none)")
                 self.log.info("  basalAmount=\(pumpStatus.basalAmount)U/h")
                 self.log
@@ -348,7 +401,35 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
                     delegate.pumpManager(self, didReadReservoirValue: reservoirLevel, at: now) { _ in }
                 }
 
-                // 펌프 로그 조회 후 Trio 히스토리에 저장
+                // If TBR is running, report immediately as pump event (for home screen update)
+                if pumpStatus.isTempBasalRunning, let tbUnits = self.state.tempBasalUnits,
+                   let tbDuration = self.state.tempBasalDuration
+                {
+                    let elapsed = TimeInterval(self.state.tempBasalElapsedTime) * 60
+                    let tbStart = now.addingTimeInterval(-elapsed)
+                    let tbEnd = tbStart.addingTimeInterval(tbDuration)
+                    let dose = DoseEntry(
+                        type: .tempBasal,
+                        startDate: tbStart,
+                        endDate: tbEnd,
+                        value: tbUnits,
+                        unit: .unitsPerHour,
+                        automatic: true
+                    )
+                    var raw = Data()
+                    raw.append(contentsOf: [0xFE, 0xFE, 0xFE]) // Generated from fetchPumpStatus
+                    let event = NewPumpEvent(date: tbStart, dose: dose, raw: raw, title: "Temp Basal")
+                    self.pumpDelegate.notify { delegate in
+                        delegate?.pumpManager(
+                            self,
+                            hasNewPumpEvents: [event],
+                            lastReconciliation: now,
+                            replacePendingEvents: false
+                        ) { _ in }
+                    }
+                }
+
+                // Fetch pump logs and store in Trio history
                 self.syncLogHistory()
 
                 completion(.success(pumpStatus))
@@ -389,8 +470,8 @@ extension DiaconnPumpManager: PumpManager {
     }
 
     public func estimatedDuration(toBolus units: Double) -> TimeInterval {
-        // 디아콘 G8 볼루스 속도: 1~8 (1 = 느림, 8 = 빠름)
-        // 기본값 4 사용 시 약 2초/U
+        // Diaconn G8 bolus speed: 1~8 (1 = slow, 8 = fast)
+        // Default 4: approximately 2 sec/U
         let secondsPerUnit = max(1.0, 9.0 - Double(state.bolusSpeed)) * 0.5
         return units * secondsPerUnit
     }
@@ -408,14 +489,14 @@ extension DiaconnPumpManager: PumpManager {
     }
 
     public var isClockOffset: Bool {
-        // 펌프 시간과 시스템 시간 차이 확인
+        // Check time offset between pump and system
         guard let pumpTime = state.pumpTime else { return false }
         let offset = abs(pumpTime.timeIntervalSinceNow)
-        return offset > 60 // 1분 이상 차이나면 offset으로 간주
+        return offset > 60 // Consider as offset if difference exceeds 1 minute
     }
 
     public var supportedBolusVolumes: [Double] {
-        // 0.01U 단위 (amount * 100이므로)
+        // 0.01U increments (since amount * 100)
         stride(from: 0.05, through: max(state.maxBolus, 25.0), by: 0.05).map { $0 }
     }
 
@@ -428,7 +509,7 @@ extension DiaconnPumpManager: PumpManager {
     }
 
     public var minimumBasalScheduleEntryDuration: TimeInterval {
-        TimeInterval(60 * 60) // 1시간
+        TimeInterval(60 * 60) // 1 hour
     }
 
     public var pumpManagerDelegate: PumpManagerDelegate? {
@@ -452,8 +533,8 @@ extension DiaconnPumpManager: PumpManager {
     public func ensureCurrentPumpData(completion: ((Date?) -> Void)?) {
         log.info("ensureCurrentPumpData called (connected=\(state.isConnected))")
 
-        // 연결 안 된 경우 저장된 bleIdentifier로 재연결 시도
-        // 재연결 성공 시 didUpdateNotificationStateFor에서 fetchPumpStatus가 자동 호출됨
+        // If not connected, attempt reconnection using saved bleIdentifier
+        // On successful reconnection, fetchPumpStatus is called automatically in didUpdateNotificationStateFor
         if !bluetooth.isConnected {
             guard let bleIdentifier = state.bleIdentifier else {
                 log.error("ensureCurrentPumpData: not connected and no bleIdentifier saved")
@@ -466,8 +547,8 @@ extension DiaconnPumpManager: PumpManager {
                 guard let self = self else { return }
                 switch result {
                 case .success:
-                    // fetchPumpStatus는 didUpdateNotificationStateFor에서 자동 호출됨
-                    // 완료 콜백은 fetchPumpStatus 이후에 처리
+                    // fetchPumpStatus is called automatically in didUpdateNotificationStateFor
+                    // Completion callback is handled after fetchPumpStatus
                     self.log.info("Reconnected successfully")
                     completion?(self.state.lastStatusDate)
                 case let .failure(error):
@@ -481,11 +562,27 @@ extension DiaconnPumpManager: PumpManager {
             return
         }
 
-        // 이미 연결된 경우 바로 상태 조회
+        // If already connected, query status immediately
         fetchPumpStatus { [weak self] result in
             switch result {
             case .success:
                 self?.log.info("Pump status updated successfully")
+                // Auto time sync: clock drift >60s or timezone change
+                if self?.shouldSyncTime() == true {
+                    self?.syncTime { error in
+                        if let error = error {
+                            self?.log.error("Auto time sync failed: \(error)")
+                        }
+                    }
+                } else if let self = self, TimeZone.current != self.state.pumpTimeZone,
+                          self.state.bolusState == .noBolus
+                {
+                    self.syncTime { error in
+                        if let error = error {
+                            self.log.error("Auto timezone sync failed: \(error)")
+                        }
+                    }
+                }
                 completion?(self?.state.lastStatusDate)
             case let .failure(error):
                 self?.log.error("Failed to update pump status: \(error)")
@@ -495,7 +592,7 @@ extension DiaconnPumpManager: PumpManager {
     }
 
     public func setMustProvideBLEHeartbeat(_: Bool) {
-        // 디아콘 G8은 BLE heartbeat 불필요
+        // Diaconn G8 does not require BLE heartbeat
     }
 
     public func createBolusProgressReporter(reportingOn dispatchQueue: DispatchQueue) -> DoseProgressReporter? {
@@ -535,7 +632,7 @@ extension DiaconnPumpManager: PumpManager {
             guard let self = self else { return }
 
             do {
-                // 볼루스 명령 전송 (0x07) + 응답 대기 (OTP 번호 수신)
+                // Send bolus command (0x07) + wait for response (receive OTP number)
                 var payload = Data()
                 payload.appendShortLE(UInt16(units * 100))
                 guard let responseData = try self.bluetooth.sendPacket(
@@ -554,13 +651,13 @@ extension DiaconnPumpManager: PumpManager {
                     throw DiaconnPumpManagerError.settingFailed(settingResult ?? .protocolError)
                 }
 
-                // 3. OTP 확인 전송 (2단계 커밋)
+                // 3. Send OTP confirm (two-step commit)
                 try self.confirmSettingCommand(
                     reqMsgType: DiaconnPacketType.INJECTION_SNACK_SETTING,
                     otpNumber: response.otpNumber
                 )
 
-                // 4. 상태 업데이트
+                // 4. Update status
                 self.state.bolusState = .inProgress
                 self.state.lastBolusAmount = units
                 self.state.lastBolusDate = Date()
@@ -597,7 +694,7 @@ extension DiaconnPumpManager: PumpManager {
             guard let self = self else { return }
 
             do {
-                // 주입 취소 (0x2B), reqMsgType = 0x07 (볼루스)
+                // Injection cancel (0x2B), reqMsgType = 0x07 (bolus)
                 guard let responseData = try self.bluetooth.sendPacket(
                     msgType: DiaconnPacketType.INJECTION_CANCEL_SETTING,
                     payload: Data([DiaconnPacketType.INJECTION_SNACK_SETTING])
@@ -651,17 +748,17 @@ extension DiaconnPumpManager: PumpManager {
             do {
                 let packet: Data
                 if unitsPerHour == 0, durationMinutes == 0 {
-                    // 임시 기저 해제
+                    // Cancel temp basal
                     packet = generateTempBasalCancelPacket()
                 } else {
-                    // 현재 스케줄 기저율과 동일하면 임시기저 불필요
+                    // If same as current scheduled basal rate, no temp basal needed
                     let scheduledRate = self.currentBaseBasalRate
                     if abs(unitsPerHour - scheduledRate) < 0.005 {
                         self.log
                             .info(
                                 "enactTempBasal: \(unitsPerHour)U/h == scheduled \(scheduledRate)U/h — skipping TBR"
                             )
-                        // 이미 임시기저가 실행 중이라면 해제
+                        // If temp basal is already running, cancel it
                         if self.state.isTempBasalInProgress {
                             let cancelPacket = generateTempBasalCancelPacket()
                             if let cancelResp = try? self.bluetooth.writeAndWait(packet: cancelPacket),
@@ -682,7 +779,7 @@ extension DiaconnPumpManager: PumpManager {
                         return
                     }
 
-                    // 이미 임시기저가 실행 중이면 status=3 스텔스 모드로 끊김 없이 변경
+                    // If temp basal is already running, use status=3 stealth mode for seamless change
                     let tbrStatus: UInt8 = self.state.isTempBasalInProgress ? 3 : 1
                     packet = generateTempBasalAbsolutePacket(
                         unitsPerHour: unitsPerHour,
@@ -704,13 +801,13 @@ extension DiaconnPumpManager: PumpManager {
                     throw DiaconnPumpManagerError.settingFailed(settingResult ?? .protocolError)
                 }
 
-                // OTP 확인
+                // OTP confirm
                 try self.confirmSettingCommand(
                     reqMsgType: DiaconnPacketType.TEMP_BASAL_SETTING,
                     otpNumber: response.otpNumber
                 )
 
-                // 상태 업데이트
+                // Update status
                 if unitsPerHour == 0, durationMinutes == 0 {
                     self.state.isTempBasalInProgress = false
                     self.state.tempBasalUnits = nil
@@ -724,6 +821,31 @@ extension DiaconnPumpManager: PumpManager {
                     self.state.basalDeliveryOrdinal = .tempBasal
                 }
                 self.notifyStateDidChange()
+
+                // Report TBR event immediately (for home screen update)
+                if unitsPerHour > 0 || durationMinutes > 0 {
+                    let now = Date()
+                    let tbDose = DoseEntry(
+                        type: .tempBasal,
+                        startDate: now,
+                        endDate: now.addingTimeInterval(duration),
+                        value: unitsPerHour,
+                        unit: .unitsPerHour,
+                        automatic: true
+                    )
+                    var raw = Data()
+                    raw.append(contentsOf: [0xFF, 0xFF, 0xFF]) // Mark event generated from enact
+                    let event = NewPumpEvent(date: now, dose: tbDose, raw: raw, title: "Temp Basal")
+                    self.pumpDelegate.notify { delegate in
+                        delegate?.pumpManager(
+                            self,
+                            hasNewPumpEvents: [event],
+                            lastReconciliation: now,
+                            replacePendingEvents: false
+                        ) { _ in }
+                    }
+                }
+
                 self.syncLogHistory()
 
                 completion(nil)
@@ -836,7 +958,7 @@ extension DiaconnPumpManager: PumpManager {
             guard let self = self else { return }
 
             do {
-                // 24시간 프로파일을 4개 그룹으로 분할 전송
+                // Split 24-hour profile into 4 groups for transmission
                 let packets = generateFullBasalProfile(
                     pattern: self.state.basalPattern,
                     hourlyRates: basalSchedule
@@ -846,13 +968,13 @@ extension DiaconnPumpManager: PumpManager {
                     throw DiaconnPumpManagerError.notConnected
                 }
 
-                // 마지막 패킷을 제외한 나머지를 먼저 전송
+                // Send all packets except the last one first
                 for packet in packets.dropLast() {
                     self.bluetooth.peripheral?.writeValue(packet, for: writeChar, type: .withoutResponse)
                     Thread.sleep(forTimeInterval: 0.2)
                 }
 
-                // 마지막 패킷 전송 + 응답 대기
+                // Send last packet + wait for response
                 guard let lastPacket = packets.last,
                       let responseData = try self.bluetooth.writeAndWait(packet: lastPacket)
                 else {
@@ -894,40 +1016,40 @@ extension DiaconnPumpManager: PumpManager {
         limits deliveryLimits: DeliveryLimits,
         completion: @escaping (Result<DeliveryLimits, Error>) -> Void
     ) {
-        // 디아콘 G8은 펌프 자체에서 한도 관리 (BigAPSMainInfo에서 조회됨)
+        // Diaconn G8 manages limits on pump itself (queried via BigAPSMainInfo)
         completion(.success(deliveryLimits))
     }
 
     public func roundToSupportedBolusVolume(units: Double) -> Double {
-        // 0.01U 단위 (amount * 100 → short)
+        // 0.01U increments (amount * 100 → short)
         (units * 100).rounded() / 100
     }
 
     public func roundToSupportedBasalRate(unitsPerHour: Double) -> Double {
-        // 0.01U/hr 단위
+        // 0.01U/hr increments
         (unitsPerHour * 100).rounded() / 100
     }
 
     // MARK: - Additional PumpManager Requirements
 
     public var pumpRecordsBasalProfileStartEvents: Bool {
-        // 디아콘 G8은 기저 프로파일 시작 이벤트를 기록하지 않음
+        // Diaconn G8 does not log basal profile start events
         false
     }
 
     public var pumpReservoirCapacity: Double {
-        // 디아콘 G8 저장소 용량 (300U)
+        // Diaconn G8 reservoir capacity (300U)
         300
     }
 
     public func estimatedUnitsDelivered(since _: Date) -> Double {
-        // 시작 시간 이후 전달된 예상 인슐린 양
-        // 실제 구현에서는 펌프 로그를 조회해야 하지만, 임시로 0 반환
+        // Estimated insulin delivered since start time
+        // Actual implementation should query pump logs, returning 0 temporarily
         0
     }
 
     public var lastReconciliation: Date? {
-        // 마지막 reconciliation 시간
+        // Last reconciliation time
         state.lastStatusDate
     }
 
@@ -997,10 +1119,10 @@ extension DiaconnPumpManager: PumpManager {
         }
     }
 
-    // MARK: - 테스트용 로그 직접 조회
+    // MARK: - Direct log inquiry for testing
 
-    /// 지정한 범위의 로그를 fetch하고 raw 응답 + 파싱 결과를 반환한다.
-    /// 커서 상태는 변경하지 않는 읽기 전용 테스트 도구.
+    /// Fetch logs in the specified range and return raw response + parsed results.
+    /// Read-only test tool that does not modify cursor state.
     public func testFetchLogEntries(
         start: UInt16,
         end: UInt16,
@@ -1041,7 +1163,7 @@ extension DiaconnPumpManager: PumpManager {
         }
     }
 
-    /// 펌프에서 마지막 동기화 이후 새 로그를 fetch하고 커서를 업데이트한다.
+    /// Fetch new logs since last sync from pump and update cursor.
     private func fetchNewLogEntries() throws -> [DiaconnLogEntry] {
         let pumpLastLogNum = state.pumpLastLogNum
         let pumpWrapCount = state.pumpWrappingCount
@@ -1050,7 +1172,7 @@ extension DiaconnPumpManager: PumpManager {
             "[DiaconnKit] fetchNewLogEntries: pumpLast=\(pumpLastLogNum) pumpWrap=\(pumpWrapCount) storedLast=\(state.storedLastLogNum) storedWrap=\(state.storedWrappingCount) isFirst=\(state.isFirstLogSync)"
         )
 
-        // 최초 연결: 현재 위치를 기준점으로 저장
+        // First connection: save current position as baseline
         if state.isFirstLogSync {
             let baseline = pumpLastLogNum >= 2 ? pumpLastLogNum - 2 : 0
             NSLog("[DiaconnKit] First log sync — baseline=\(baseline) wrap=\(pumpWrapCount)")
@@ -1060,7 +1182,7 @@ extension DiaconnPumpManager: PumpManager {
             notifyStateDidChange()
         }
 
-        // 2. 새 로그가 없으면 skip
+        // 2. Skip if no new logs
         guard pumpLastLogNum != state.storedLastLogNum ||
             pumpWrapCount != state.storedWrappingCount
         else {
@@ -1068,14 +1190,14 @@ extension DiaconnPumpManager: PumpManager {
             return []
         }
 
-        // 3. BIG_LOG_INQUIRE: 정상 범위만 동기화 (wrap 발생 시 이전 로그 bulk sync 없이 기준점 리셋)
+        // 3. BIG_LOG_INQUIRE: sync only normal range (on wrap, reset baseline without bulk syncing old logs)
         let pageSize = 11
         let pumpLast = Int(pumpLastLogNum)
         let pumpWrap = Int(pumpWrapCount)
         let storedLast = Int(state.storedLastLogNum)
         let storedWrap = Int(state.storedWrappingCount)
 
-        // wrap 발생 시: old wrap 나머지(storedLast+1~9999) 동기화 후 새 wrap 기준으로 리셋
+        // On wrap: sync remainder of old wrap (storedLast+1~9999) then reset to new wrap baseline
         let isWrapSync = pumpWrap > storedWrap
         let startLogNum = storedLast + 1
         let endLogNum = isWrapSync ? 9999 : pumpLast
@@ -1088,7 +1210,7 @@ extension DiaconnPumpManager: PumpManager {
             "[DiaconnKit] BIG_LOG_INQUIRE: start=\(startLogNum) end=\(endLogNum) (pumpLast=\(pumpLast) pumpWrap=\(pumpWrap) storedLast=\(storedLast) storedWrap=\(storedWrap))"
         )
 
-        // AndroidAPS 공식: size = ceil((end - start) / 11.0)
+        // AndroidAPS formula: size = ceil((end - start) / 11.0)
         let loopSize = Int(ceil(Double(endLogNum - startLogNum) / Double(pageSize)))
         guard loopSize > 0 else {
             NSLog("[DiaconnKit] BIG_LOG_INQUIRE: loopSize=0 — skipping")
@@ -1116,7 +1238,7 @@ extension DiaconnPumpManager: PumpManager {
 
             if let last = entries.last {
                 state.storedLastLogNum = last.logNum
-                // wrapCount는 엔트리별 값이 아닌 펌프 현재 값 사용 (옛날 로그의 wrap이 다를 수 있음)
+                // Use pump's current wrapCount, not per-entry value (old logs may have different wrap)
                 state.storedWrappingCount = pumpWrapCount
                 notifyStateDidChange()
             }
@@ -1133,7 +1255,7 @@ extension DiaconnPumpManager: PumpManager {
         return allEntries
     }
 
-    /// DiaconnLogEntry 배열을 LoopKit DoseEntry 배열로 변환
+    /// Convert DiaconnLogEntry array to LoopKit DoseEntry array
     private func logEntriesToDoses(_ entries: [DiaconnLogEntry]) -> [DoseEntry] {
         entries.compactMap { entry -> DoseEntry? in
             let date = entry.date
@@ -1195,26 +1317,26 @@ extension DiaconnPumpManager: PumpManager {
         }
     }
 
-    /// AndroidAPS getTbInjectRateRatio 인코딩을 절대값 U/h로 변환
+    /// Convert AndroidAPS getTbInjectRateRatio encoding to absolute U/h
     private func tbAbsoluteRate(rawRatio: UInt16) -> Double {
         let ratio = Int(rawRatio)
         if ratio >= 50000 {
-            // 퍼센트 모드: (ratio - 50000)% of 현재 기저량
+            // Percent mode: (ratio - 50000)% of current basal rate
             let percent = Double(ratio - 50000) / 100.0
             return currentBaseBasalRate * percent
         } else if ratio >= 1000 {
-            // 절대값 모드: (ratio - 1000) / 100.0 U/h
+            // Absolute mode: (ratio - 1000) / 100.0 U/h
             return Double(ratio - 1000) / 100.0
         }
         return 0
     }
 
-    /// 펌프 로그를 조회하여 Trio에 hasNewPumpEvents로 전달한다.
+    /// Query pump logs and deliver to Trio via hasNewPumpEvents.
     func syncLogHistory() {
         pumpQueue.async { [weak self] in
             guard let self = self else { return }
             do {
-                // 경량 로그 상태 조회 (0x56) → pumpLastLogNum/wrappingCount 갱신
+                // Lightweight log status inquiry (0x56) → update pumpLastLogNum/wrappingCount
                 if let logStatusData = try self.bluetooth.sendPacket(
                     msgType: DiaconnPacketType.LOG_STATUS_INQUIRE,
                     timeout: 10.0
@@ -1225,6 +1347,18 @@ extension DiaconnPumpManager: PumpManager {
 
                 let entries = try self.fetchNewLogEntries()
                 guard !entries.isEmpty else { return }
+
+                // Detect device lifecycle events from log entries
+                for entry in entries {
+                    switch entry.logKind {
+                    case .changeInjector:
+                        self.state.reservoirDate = entry.date
+                    case .changeNeedle:
+                        self.state.cannulaDate = entry.date
+                    default:
+                        break
+                    }
+                }
 
                 let events = self.logEntriesToPumpEvents(entries)
                 NSLog("[DiaconnKit] syncLogHistory: \(entries.count) entries → \(events.count) events")
@@ -1259,7 +1393,7 @@ extension DiaconnPumpManager: PumpManager {
         }
     }
 
-    /// DiaconnLogEntry 배열을 LoopKit NewPumpEvent 배열로 변환
+    /// Convert DiaconnLogEntry array to LoopKit NewPumpEvent array
     private func logEntriesToPumpEvents(_ entries: [DiaconnLogEntry]) -> [NewPumpEvent] {
         entries.compactMap { entry -> NewPumpEvent? in
             let date = entry.date
@@ -1270,7 +1404,7 @@ extension DiaconnPumpManager: PumpManager {
             switch entry.logKind {
             case .mealBolusFail,
                  .mealBolusSuccess:
-                // 펌프에서 식사 버튼으로 수동 주입 → Bolus
+                // Manual injection via meal button on pump → Bolus
                 guard entry.injectAmount > 0 else { return nil }
                 let mealDose = DoseEntry(
                     type: .bolus,
@@ -1296,7 +1430,7 @@ extension DiaconnPumpManager: PumpManager {
                 return NewPumpEvent(date: date, dose: normalDose, raw: rawBytes, title: isAutomatic ? "SMB" : "Bolus")
             case .squareBolusFail,
                  .squareBolusSuccess:
-                // 스퀘어 완료/취소: 실제 주입량
+                // Square complete/cancel: actual injected amount
                 guard entry.injectAmount > 0 else { return nil }
                 let sqDuration = TimeInterval(entry.injectTimeUnit * 10 * 60)
                 let sqDose = DoseEntry(
@@ -1309,7 +1443,7 @@ extension DiaconnPumpManager: PumpManager {
                 )
                 return NewPumpEvent(date: date, dose: sqDose, raw: rawBytes, title: "Extended Bolus")
             case .dualNormal:
-                // 듀얼 일반주입 결과
+                // Dual normal injection result
                 guard entry.injectAmount > 0 else { return nil }
                 let dualNormDose = DoseEntry(
                     type: .bolus,
@@ -1322,7 +1456,7 @@ extension DiaconnPumpManager: PumpManager {
                 return NewPumpEvent(date: date, dose: dualNormDose, raw: rawBytes, title: "Dual Bolus")
             case .dualBolusFail,
                  .dualBolusSuccess:
-                // 듀얼 스퀘어 부분 완료/취소: 실제 주입량
+                // Dual square partial complete/cancel: actual injected amount
                 guard entry.injectAmount > 0 else { return nil }
                 let dualSqDuration = TimeInterval(entry.injectTimeUnit * 10 * 60)
                 let dualSqDose = DoseEntry(
@@ -1402,12 +1536,25 @@ extension DiaconnPumpManager {
     }
 
     func notifyBasalSuspended() {
+        state.isPumpSuspended = true
         state.basalDeliveryOrdinal = .suspended
         state.basalDeliveryDate = Date()
         notifyStateDidChange()
     }
 
+    func notifyBasalResumed() {
+        state.isPumpSuspended = false
+        state.basalDeliveryOrdinal = .active
+        state.basalDeliveryDate = Date()
+        notifyStateDidChange()
+    }
+
+    /// Notify alert (for pump-originated report packets)
     func notifyAlert(_ alert: DiaconnPumpManagerAlert) {
+        activeAlert = alert
+        log.info("notifyAlert: set activeAlert=\(alert.identifier)")
+        notifyStateDidChange()
+
         let identifier = Alert.Identifier(managerIdentifier: managerIdentifier, alertIdentifier: alert.identifier)
         let loopAlert = Alert(
             identifier: identifier,
@@ -1466,12 +1613,22 @@ public extension DiaconnPumpManager {
 
 public extension DiaconnPumpManager {
     func acknowledgeAlert(alertIdentifier: Alert.AlertIdentifier, completion: @escaping (Error?) -> Void) {
-        // 디아콘 G8 알림 확인 처리
         log.info("Acknowledging alert: \(alertIdentifier)")
-
-        // 현재는 알림을 바로 확인 완료 처리
-        // 필요시 펌프에 앱 확인(APP_CONFIRM_SETTING) 명령 전송 가능
+        // Don't clear activeAlert here — Trio auto-acks immediately.
+        // activeAlert is cleared by user action via dismissActiveAlert().
         completion(nil)
+    }
+
+    /// Called by user tapping Acknowledge in settings UI
+    func dismissActiveAlert() {
+        guard let alert = activeAlert else { return }
+        log.info("dismissActiveAlert: clearing \(alert.identifier)")
+        let identifier = Alert.Identifier(managerIdentifier: managerIdentifier, alertIdentifier: alert.identifier)
+        pumpDelegate.notify { delegate in
+            delegate?.retractAlert(identifier: identifier)
+        }
+        activeAlert = nil
+        notifyStateDidChange()
     }
 }
 
@@ -1479,12 +1636,12 @@ public extension DiaconnPumpManager {
 
 public extension DiaconnPumpManager {
     func getSoundBaseURL() -> URL? {
-        // 디아콘 G8은 커스텀 사운드를 제공하지 않음
+        // Diaconn G8 does not provide custom sounds
         nil
     }
 
     func getSounds() -> [Alert.Sound] {
-        // 디아콘 G8은 시스템 기본 사운드 사용
+        // Diaconn G8 uses system default sounds
         []
     }
 }

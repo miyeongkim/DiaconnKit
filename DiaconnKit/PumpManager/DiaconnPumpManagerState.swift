@@ -27,8 +27,8 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
     // MARK: - Pump Status
 
     internal var lastStatusDate: Date
-    public internal(set) var reservoirLevel: Double = 0 // 잔여 인슐린 (U)
-    public internal(set) var batteryRemaining: Double = 0 // 배터리 (0.0~1.0)
+    public internal(set) var reservoirLevel: Double = 0 // Remaining insulin (U)
+    public internal(set) var batteryRemaining: Double = 0 // Battery (0.0~1.0)
 
     // MARK: - Pump Info
 
@@ -48,16 +48,16 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
     // MARK: - Insulin Delivery
 
     internal var insulinType: InsulinType?
-    internal var basalSchedule: [Double] // 24시간 기저 프로파일 (U/h)
-    internal var basalPattern: UInt8 = 1 // 현재 기저 패턴 (1~6)
-    internal var currentBasalRate: Double = 0 // 현재 시간 기저량
+    internal var basalSchedule: [Double] // 24-hour basal profile (U/h)
+    internal var basalPattern: UInt8 = 1 // Current basal pattern (1~6)
+    internal var currentBasalRate: Double = 0 // Current hour basal rate
 
     // MARK: - Temp Basal
 
-    internal var tempBasalUnits: Double? // 임시 기저 U/h
-    internal var tempBasalDuration: Double? // 임시 기저 지속시간 (초)
+    internal var tempBasalUnits: Double? // Temp basal U/h
+    internal var tempBasalDuration: Double? // Temp basal duration (seconds)
     internal var tempBasalRateRatio: UInt16 = 0
-    internal var tempBasalElapsedTime: UInt16 = 0 // 경과 시간 (분)
+    internal var tempBasalElapsedTime: UInt16 = 0 // Elapsed time (minutes)
 
     // MARK: - Bolus
 
@@ -69,7 +69,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
     internal var maxBolus: Double = 0
     internal var maxBolusPerDay: Double = 0
     internal var bolusSpeed: UInt8 = 4 // 1~8
-    internal var beepAndAlarm: UInt8 = 0 // 0=소리, 1=무음, 2=진동
+    internal var beepAndAlarm: UInt8 = 0 // 0=sound, 1=mute, 2=vibrate
     internal var alarmIntensity: UInt8 = 0
 
     // MARK: - Limits
@@ -77,28 +77,28 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
     internal var maxBasalPerHour: Double = 0
     internal var maxBasal: Double = 0 // maxBasalPerHour * 2.5
 
-    // MARK: - 오늘 주입 합계
+    // MARK: - Today injection total
 
     internal var todayBasalAmount: Double = 0
     internal var todayMealAmount: Double = 0
     internal var todaySnackAmount: Double = 0
 
-    // MARK: - 로그 동기화 커서
+    // MARK: - Log sync cursor
 
-    /// 펌프에서 마지막으로 보고된 로그 번호 (BigAPSMainInfo에서 갱신)
+    /// Last log number reported by pump (updated from BigAPSMainInfo)
     internal var pumpLastLogNum: UInt16 = 0
-    /// 펌프에서 마지막으로 보고된 wrapping count (BigAPSMainInfo에서 갱신)
+    /// Last wrapping count reported by pump (updated from BigAPSMainInfo)
     internal var pumpWrappingCount: UInt8 = 0
-    /// 앱에서 마지막으로 처리(fetch)한 로그 번호 — 다음 sync는 이 번호 이후부터
+    /// Last log number processed (fetched) by app — next sync starts after this number
     internal var storedLastLogNum: UInt16 = 0
-    /// 앱에서 마지막으로 처리한 wrapping count
+    /// Last wrapping count processed by app
     internal var storedWrappingCount: UInt8 = 0
-    /// 최초 연결 여부 — true면 현재 위치를 기준점으로만 저장하고 과거 로그는 skip
+    /// First connection flag — if true, save current position as baseline and skip past logs
     internal var isFirstLogSync: Bool = true
-    /// 로그 동기화 시점의 펌프 시리얼 — 다른 펌프 연결 감지용
+    /// Pump serial at log sync time — for detecting different pump connection
     internal var syncedSerialNumber: String?
 
-    // MARK: - OTP (2단계 커밋용)
+    // MARK: - OTP (for two-step commit)
 
     internal var lastOtpNumber: UInt32 = 0
     internal var lastOtpMsgType: UInt8 = 0
@@ -107,6 +107,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
 
     internal var pumpTime: Date?
     internal var pumpTimeSyncedAt: Date?
+    internal var pumpTimeZone = TimeZone.current
 
     // MARK: - User Settings
 
@@ -126,10 +127,15 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         case .suspended:
             return .suspended(basalDeliveryDate)
         case .tempBasal:
+            let elapsed = TimeInterval(tempBasalElapsedTime) * 60
+            let totalDuration = tempBasalDuration ?? 0
+            let tbStartDate = basalDeliveryDate.addingTimeInterval(-elapsed)
+            let tbEndDate = tbStartDate.addingTimeInterval(totalDuration)
             return .tempBasal(
                 DoseEntry(
                     type: .tempBasal,
-                    startDate: basalDeliveryDate,
+                    startDate: tbStartDate,
+                    endDate: tbEndDate,
                     value: tempBasalUnits ?? 0,
                     unit: .unitsPerHour
                 )
@@ -179,6 +185,11 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         alarmIntensity = rawValue["alarmIntensity"] as? UInt8 ?? 0
         pumpTime = rawValue["pumpTime"] as? Date
         pumpTimeSyncedAt = rawValue["pumpTimeSyncedAt"] as? Date
+        if let tzIdentifier = rawValue["pumpTimeZone"] as? String,
+           let tz = TimeZone(identifier: tzIdentifier)
+        {
+            pumpTimeZone = tz
+        }
         cannulaDate = rawValue["cannulaDate"] as? Date
         reservoirDate = rawValue["reservoirDate"] as? Date
         pumpLastLogNum = UInt16((rawValue["pumpLastLogNum"] as? Int) ?? 0)
@@ -234,6 +245,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         value["alarmIntensity"] = alarmIntensity
         value["pumpTime"] = pumpTime
         value["pumpTimeSyncedAt"] = pumpTimeSyncedAt
+        value["pumpTimeZone"] = pumpTimeZone.identifier
         value["cannulaDate"] = cannulaDate
         value["reservoirDate"] = reservoirDate
         value["pumpLastLogNum"] = Int(pumpLastLogNum)
@@ -248,7 +260,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
 
     // MARK: - Update from Pump Status
 
-    /// BigAPSMainInfoInquireResponse에서 받은 DiaconnPumpStatus로 상태 업데이트
+    /// Update state from DiaconnPumpStatus received via BigAPSMainInfoInquireResponse
     mutating func updateFromPumpStatus(_ pumpStatus: DiaconnPumpStatus) {
         lastStatusDate = Date()
         reservoirLevel = pumpStatus.remainInsulin
@@ -260,16 +272,17 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         majorVersion = pumpStatus.majorVersion
         minorVersion = pumpStatus.minorVersion
 
-        // 기저 프로파일
+        // Basal profile
         basalPattern = pumpStatus.currentBasePattern
         basalSchedule = pumpStatus.basalProfile
         currentBasalRate = pumpStatus.basalAmount
 
-        // 임시 기저
+        // Temp basal
         tempBasalRateRatio = pumpStatus.tempBasalRateRatio
         tempBasalElapsedTime = pumpStatus.tempBasalElapsedTime
+        tempBasalDuration = Double(pumpStatus.tempBasalTime) * 15 * 60 // 1 unit = 15 min → seconds
 
-        // 한도
+        // Limits
         maxBolus = pumpStatus.maxBolus
         maxBolusPerDay = pumpStatus.maxBolusPerDay
         maxBasalPerHour = pumpStatus.maxBasalPerHour
@@ -278,29 +291,41 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         beepAndAlarm = pumpStatus.beepAndAlarm
         alarmIntensity = pumpStatus.alarmIntensity
 
-        // 오늘 주입 합계
+        // Today injection total
         todayBasalAmount = pumpStatus.todayBasalAmount
         todayMealAmount = pumpStatus.todayMealAmount
         todaySnackAmount = pumpStatus.todaySnackAmount
 
-        // 기저 상태 업데이트
+        // Update basal status
         if isPumpSuspended {
             basalDeliveryOrdinal = .suspended
             basalDeliveryDate = Date()
         } else if isTempBasalInProgress {
             basalDeliveryOrdinal = .tempBasal
+            basalDeliveryDate = Date()
+            // Calculate current TBR rate from pump
+            let ratio = Int(tempBasalRateRatio)
+            if ratio >= 50000 {
+                tempBasalUnits = currentBasalRate * Double(ratio - 50000) / 100.0
+            } else if ratio >= 1000 {
+                tempBasalUnits = Double(ratio - 1000) / 100.0
+            }
+            NSLog(
+                "[DiaconnKit] TBR status: ratio=\(tempBasalRateRatio) → units=\(tempBasalUnits ?? -1) U/h, duration=\(tempBasalDuration ?? -1)s, elapsed=\(tempBasalElapsedTime)min"
+            )
         } else {
             basalDeliveryOrdinal = .active
             basalDeliveryDate = Date()
+            tempBasalUnits = nil
         }
 
-        // 펌프 현재 로그 위치 갱신 (새 로그 감지에 사용)
+        // Update pump current log position (used for new log detection)
         let prevStoredLast = storedLastLogNum
         let prevStoredWrap = storedWrappingCount
         pumpLastLogNum = pumpStatus.lastLogNum
         pumpWrappingCount = pumpStatus.wrappingCount
 
-        // 최초 연결 시: stored 커서도 현재 위치로 초기화 (과거 로그 skip)
+        // First connection: initialize stored cursor to current position (skip past logs)
         if isFirstLogSync {
             storedLastLogNum = pumpStatus.lastLogNum
             storedWrappingCount = pumpStatus.wrappingCount
@@ -309,9 +334,9 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
             "[DiaconnKit] updateFromPumpStatus: pumpLast=\(pumpLastLogNum) pumpWrap=\(pumpWrappingCount) storedLast=\(prevStoredLast)→\(storedLastLogNum) storedWrap=\(prevStoredWrap)→\(storedWrappingCount) isFirst=\(isFirstLogSync)"
         )
 
-        // 펌프 시간
+        // Pump time
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone.current
+        calendar.timeZone = pumpTimeZone
         if let date = calendar.date(from: DateComponents(
             year: pumpStatus.pumpYear,
             month: pumpStatus.pumpMonth,
