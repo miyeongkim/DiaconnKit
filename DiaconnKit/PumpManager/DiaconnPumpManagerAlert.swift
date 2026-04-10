@@ -4,6 +4,7 @@ import LoopKit
 public enum DiaconnPumpManagerAlert: Hashable, Codable {
     case occlusion(_ raw: Data)
     case insulinLack(_ raw: Data)
+    case lowBattery(_ raw: Data)
 
     var contentTitle: String {
         switch self {
@@ -11,15 +12,28 @@ public enum DiaconnPumpManagerAlert: Hashable, Codable {
             return LocalizedString("Occlusion Detected", comment: "Alert title for occlusion")
         case .insulinLack:
             return LocalizedString("Low Insulin", comment: "Alert title for insulin lack")
+        case .lowBattery:
+            return LocalizedString("Low Battery", comment: "Alert title for low battery")
         }
     }
 
     var contentBody: String {
         switch self {
         case .occlusion:
-            return LocalizedString("Check the infusion set and reservoir, then try again.", comment: "Alert body for occlusion")
+            return LocalizedString(
+                "Check the infusion set and reservoir, then try again.",
+                comment: "Alert body for occlusion"
+            )
         case .insulinLack:
-            return LocalizedString("Insulin reservoir is running low. Replace it soon.", comment: "Alert body for insulin lack")
+            return LocalizedString(
+                "Insulin reservoir is running low. Replace it soon.",
+                comment: "Alert body for insulin lack"
+            )
+        case .lowBattery:
+            return LocalizedString(
+                "Pump battery is low. Please charge or replace the battery.",
+                comment: "Alert body for low battery"
+            )
         }
     }
 
@@ -29,6 +43,8 @@ public enum DiaconnPumpManagerAlert: Hashable, Codable {
             return "occlusion"
         case .insulinLack:
             return "insulinLack"
+        case .lowBattery:
+            return "lowBattery"
         }
     }
 
@@ -38,14 +54,16 @@ public enum DiaconnPumpManagerAlert: Hashable, Codable {
             return .occlusion
         case .insulinLack:
             return .noInsulin
+        case .lowBattery:
+            return .lowPower
         }
     }
 
     var raw: Data {
         switch self {
-        case let .occlusion(raw):
-            return raw
-        case let .insulinLack(raw):
+        case let .occlusion(raw),
+             let .insulinLack(raw),
+             let .lowBattery(raw):
             return raw
         }
     }
