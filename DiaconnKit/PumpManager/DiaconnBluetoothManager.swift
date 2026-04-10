@@ -14,19 +14,19 @@ public struct DiaconnPumpScan {
     public let peripheral: CBPeripheral
 }
 
-/// 디아콘 G8 BLE 통신 관리자
-/// Nordic UART Service (NUS) 프로토콜 사용
+/// Diaconn G8 BLE communication manager
+/// Uses Nordic UART Service (NUS) protocol
 public class DiaconnBluetoothManager: NSObject {
     private let log = DiaconnLogger(category: "BluetoothManager")
 
     // MARK: - BLE UUIDs (Nordic UART Service)
 
-    /// Indicate/Read: 펌프 → 앱 (NUS TX)
+    /// Indicate/Read: Pump → App (NUS TX)
     private let INDICATE_CHAR_UUID = CBUUID(string: "6e400003-b5a3-f393-e0a9-e50e24dcca9e")
-    /// Write: 앱 → 펌프 (NUS RX)
+    /// Write: App → Pump (NUS RX)
     private let WRITE_CHAR_UUID = CBUUID(string: "6e400002-b5a3-f393-e0a9-e50e24dcca9e")
 
-    /// 쓰기 간격 (ms) - AndroidAPS: 50ms
+    /// Write interval (ms) - AndroidAPS: 50ms
     private let WRITE_DELAY_MS: UInt64 = 50
 
     private var manager: CBCentralManager!
@@ -48,17 +48,17 @@ public class DiaconnBluetoothManager: NSObject {
 
     private var readBuffer = Data()
 
-    /// 중복 패킷 방지: 마지막으로 처리한 보고 패킷의 seqNo
+    /// Duplicate packet prevention: seqNo of last processed report packet
     private var lastReportSeqNo: UInt8 = 0xFF
 
-    /// 응답 대기를 위한 세마포어
+    /// Semaphore for waiting on responses
     private let responseSemaphore = DispatchSemaphore(value: 0)
     private var lastResponse: Data?
 
-    /// 테스트/디버그용: 완성된 패킷이 수신될 때마다 호출 (raw bytes)
+    /// For test/debug: called when a complete packet is received (raw bytes)
     public var onRawPacketReceived: ((Data) -> Void)?
 
-    /// 메시지 시퀀스 기반 응답 매칭
+    /// Message sequence-based response matching
     private var pendingResponseHandlers: [UInt8: (Data) -> Void] = [:]
 
     override init() {
@@ -72,7 +72,7 @@ public class DiaconnBluetoothManager: NSObject {
         devices = []
 
         guard manager.state == .poweredOn else {
-            // BLE가 아직 준비 안 됐으면 준비되면 자동 시작
+            // If BLE not ready yet, auto-start when powered on
             pendingScan = true
             log.info("Bluetooth not ready yet, will scan when powered on")
             return
@@ -119,7 +119,7 @@ public class DiaconnBluetoothManager: NSObject {
         }
 
         self.peripheral = peripheral
-        // autoConnect = false (직접 연결)
+        // autoConnect = false (direct connection)
         manager.connect(peripheral, options: nil)
     }
 
@@ -134,14 +134,14 @@ public class DiaconnBluetoothManager: NSObject {
 
     // MARK: - Write Packet
 
-    /// 이전 명령의 응답이 늦게 도착해 세마포어를 미리 signal한 경우를 방어
+    /// Guard against late responses from previous commands pre-signaling the semaphore
     private func drainResponseSemaphore() {
         while responseSemaphore.wait(timeout: .now()) == .success {}
         lastResponse = nil
         readBuffer = Data()
     }
 
-    /// 이미 인코딩된 패킷을 전송하고 응답 대기 (이중 전송 방지용)
+    /// Send an already-encoded packet and wait for response (prevents double transmission)
     public func writeAndWait(
         packet: Data,
         timeout: TimeInterval = 10.0
@@ -174,7 +174,7 @@ public class DiaconnBluetoothManager: NSObject {
         return lastResponse
     }
 
-    /// 20바이트 패킷 전송 및 응답 대기
+    /// Send 20-byte packet and wait for response
     public func sendPacket(
         msgType: UInt8,
         msgConEnd: UInt8 = DiaconnPacketType.MSG_CON_END,
@@ -202,7 +202,7 @@ public class DiaconnBluetoothManager: NSObject {
         // WRITE_TYPE_NO_RESPONSE (writeWithoutResponse)
         peripheral?.writeValue(packet, for: writeCharacteristic, type: .withoutResponse)
 
-        // 응답 대기
+        // Wait for response
         log.info("[TX] Waiting for response (timeout=\(timeout)s) msgType=0x\(String(format: "%02X", msgType))")
         let result = responseSemaphore.wait(timeout: .now() + timeout)
         if result == .timedOut {
@@ -214,7 +214,7 @@ public class DiaconnBluetoothManager: NSObject {
         return lastResponse
     }
 
-    /// 182바이트 대량 패킷 전송
+    /// Send 182-byte big packet
     public func sendBigPacket(
         msgType: UInt8,
         msgConEnd: UInt8 = DiaconnPacketType.MSG_CON_END,
@@ -238,7 +238,7 @@ public class DiaconnBluetoothManager: NSObject {
 
         drainResponseSemaphore()
 
-        // BLE MTU에 따라 분할 전송
+        // Split transmission based on BLE MTU
         var offset = 0
         while offset < packet.count {
             let chunkSize = min(20, packet.count - offset)
@@ -246,7 +246,7 @@ public class DiaconnBluetoothManager: NSObject {
             peripheral?.writeValue(chunk, for: writeCharacteristic, type: .withoutResponse)
             offset += chunkSize
 
-            // 쓰기 간격 50ms
+            // Write interval 50ms
             if offset < packet.count {
                 Thread.sleep(forTimeInterval: Double(WRITE_DELAY_MS) / 1000.0)
             }
@@ -301,7 +301,7 @@ extension DiaconnBluetoothManager: CBCentralManagerDelegate {
     public func centralManager(_: CBCentralManager, didConnect peripheral: CBPeripheral) {
         log.info("Connected to: \(peripheral.name ?? "Unknown")")
         peripheral.delegate = self
-        // 모든 서비스 검색 (NUS 서비스 UUID를 직접 사용할 수도 있음)
+        // Discover all services (could also use NUS service UUID directly)
         peripheral.discoverServices(nil)
     }
 
@@ -328,7 +328,7 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
             return
         }
 
-        // 모든 서비스에서 NUS characteristic 검색
+        // Search for NUS characteristics in all services
         for service in peripheral.services ?? [] {
             peripheral.discoverCharacteristics([INDICATE_CHAR_UUID, WRITE_CHAR_UUID], for: service)
         }
@@ -361,7 +361,7 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
 
         log.info("Notifications enabled, connection ready")
 
-        // 1.6초 대기 후 연결 완료 (AndroidAPS 기준)
+        // Connection ready after 1.6s delay (per AndroidAPS)
         managerQueue.asyncAfter(deadline: .now() + 1.6) { [weak self] in
             guard let self = self else { return }
             self.pumpManager?.state.isConnected = true
@@ -369,7 +369,7 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
             self.connectionCompletion?(.success)
             self.connectionCompletion = nil
 
-            // 연결 직후 펌프 전체 상태 조회 (리저버, 배터리, 기저 등)
+            // Fetch full pump status right after connection (reservoir, battery, basal, etc.)
             self.log.info("Connection ready — fetching initial pump status")
             self.pumpManager?.fetchPumpStatus { [weak self] result in
                 switch result {
@@ -401,7 +401,7 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
     private func processReceivedData(_ data: Data) {
         readBuffer.append(data)
 
-        // 패킷 완성 확인
+        // Check packet completion
         guard !readBuffer.isEmpty else { return }
 
         let sop = readBuffer[0]
@@ -419,10 +419,10 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
         log.debug("[RX] buffer \(readBuffer.count)/\(expectedLength) bytes (SOP=0x\(String(format: "%02X", sop)))")
 
         guard readBuffer.count >= expectedLength else {
-            return // 아직 데이터 부족, 계속 수집
+            return // Not enough data yet, continue collecting
         }
 
-        // 패킷 완성 → 검증 및 처리
+        // Packet complete → validate and process
         let packet = readBuffer.subdata(in: 0 ..< expectedLength)
         readBuffer = readBuffer.subdata(in: expectedLength ..< readBuffer.count)
 
@@ -440,11 +440,11 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
                 "[RX] Complete packet: msgType=0x\(String(format: "%02X", msgType)) packetType=\(packetType) size=\(packet.count)"
             )
 
-        // raw 패킷 콜백 (테스트/디버그용)
+        // Raw packet callback (for test/debug)
         onRawPacketReceived?(packet)
 
         if packetType == 3 {
-            // 보고 패킷 (비요청) → 중복 seqNo 무시
+            // Report packet (unsolicited) → ignore duplicate seqNo
             let seqNo = packet[DiaconnPacketType.MSG_SEQ_LOC]
             guard seqNo != lastReportSeqNo else {
                 log.info("[RX] Duplicate report ignored: msgType=0x\(String(format: "%02X", msgType)) seqNo=\(seqNo)")
@@ -453,14 +453,14 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
             lastReportSeqNo = seqNo
             handleReportPacket(msgType: msgType, data: packet)
         } else {
-            // 설정/조회 응답 → 세마포어로 전달
+            // Setting/inquiry response → deliver via semaphore
             log.info("[RX] Signaling response semaphore for msgType=0x\(String(format: "%02X", msgType))")
             lastResponse = packet
             responseSemaphore.signal()
         }
     }
 
-    /// 비요청 보고 패킷 처리
+    /// Handle unsolicited report packets
     private func handleReportPacket(msgType: UInt8, data: Data) {
         let payload = DiaconnPacketDecoder.getPayload(data)
 
@@ -503,8 +503,14 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
             pumpManager?.notifyAlert(.insulinLack(payload))
 
         case DiaconnPacketType.BASAL_PAUSE_REPORT:
-            log.info("Basal pause report (suspended)")
-            pumpManager?.notifyBasalSuspended()
+            let status = payload.count > 0 ? payload[0] : 0
+            if status == 1 {
+                log.info("Basal pause report (suspended)")
+                pumpManager?.notifyBasalSuspended()
+            } else {
+                log.info("Basal pause report (resumed, status=\(status))")
+                pumpManager?.notifyBasalResumed()
+            }
 
         case DiaconnPacketType.REJECT_REPORT:
             log.error("Reject report")
@@ -514,7 +520,7 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
         }
     }
 
-    /// 볼루스 결과 보고 처리
+    /// Handle bolus result report
     private func handleBolusResultReport(_ payload: Data) {
         guard payload.count >= 5 else { return }
         let result = DiaconnPacketDecoder.readByte(payload, offset: 0)

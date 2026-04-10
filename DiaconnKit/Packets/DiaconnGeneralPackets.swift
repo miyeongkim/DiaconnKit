@@ -1,26 +1,26 @@
 import Foundation
 
-// MARK: - APS 전체 상태 조회 (msgType: 0x54, 응답: 0x94, 182바이트)
+// MARK: - APS full status inquiry (msgType: 0x54, response: 0x94, 182 bytes)
 
-/// APS 전체 상태 조회 패킷 생성
+/// Generate APS full status inquiry packet
 func generateBigAPSMainInfoInquirePacket() -> Data {
     DiaconnPacketEncoder.encode(msgType: DiaconnPacketType.BIG_APS_MAIN_INFO_INQUIRE)
 }
 
-/// APS 전체 상태 응답 데이터 (182바이트 대량 패킷)
+/// APS full status response data (182-byte big packet)
 public struct DiaconnPumpStatus {
-    // 시스템 상태
-    public var remainInsulin: Double = 0 // 잔여 인슐린 (U)
-    public var remainBattery: Int = 0 // 잔여 배터리 (1~100%)
-    public var basePattern: UInt8 = 0 // 현재 기저 패턴 (0~6)
-    public var tbStatus: UInt8 = 0 // 임시 기저 상태
-    public var mealBolusStatus: UInt8 = 0 // 식사 볼루스 상태
-    public var snackBolusStatus: UInt8 = 0 // 간식 볼루스 상태
-    public var squareBolusStatus: UInt8 = 0 // 확장 볼루스 상태
-    public var dualBolusStatus: UInt8 = 0 // 듀얼 볼루스 상태
-    public var basePauseStatus: UInt8 = 0 // 기저 정지 상태 (1=정지, 2=해제)
+    // System status
+    public var remainInsulin: Double = 0 // Remaining insulin (U)
+    public var remainBattery: Int = 0 // Remaining battery (1~100%)
+    public var basePattern: UInt8 = 0 // Current basal pattern (0~6)
+    public var tbStatus: UInt8 = 0 // Temp basal status
+    public var mealBolusStatus: UInt8 = 0 // Meal bolus status
+    public var snackBolusStatus: UInt8 = 0 // Snack bolus status
+    public var squareBolusStatus: UInt8 = 0 // Extended bolus status
+    public var dualBolusStatus: UInt8 = 0 // Dual bolus status
+    public var basePauseStatus: UInt8 = 0 // Basal pause status (1=paused, 2=released)
 
-    // 펌프 시간
+    // Pump time
     public var pumpYear: Int = 0
     public var pumpMonth: Int = 0
     public var pumpDay: Int = 0
@@ -28,7 +28,7 @@ public struct DiaconnPumpStatus {
     public var pumpMinute: Int = 0
     public var pumpSecond: Int = 0
 
-    // 펌프 정보
+    // Pump info
     public var country: UInt8 = 0
     public var productType: UInt8 = 0
     public var makeYear: UInt8 = 0
@@ -39,39 +39,39 @@ public struct DiaconnPumpStatus {
     public var majorVersion: UInt8 = 0
     public var minorVersion: UInt8 = 0
 
-    // 로그 상태
+    // Log status
     public var lastLogNum: UInt16 = 0
     public var wrappingCount: UInt8 = 0
 
-    // 볼루스 속도
+    // Bolus speed
     public var bolusSpeed: UInt8 = 0
 
-    // 임시 기저 상세
+    // Temp basal detail
     public var tempBasalStatus: UInt8 = 0
     public var tempBasalTime: UInt8 = 0
     public var tempBasalRateRatio: UInt16 = 0
     public var tempBasalElapsedTime: UInt16 = 0
 
-    // 기저 상태
+    // Basal status
     public var basalStatus: UInt8 = 0
     public var basalHour: UInt8 = 0
-    public var basalAmount: Double = 0 // 현재 시간 기저량 (U/h)
-    public var basalInjectedAmount: Double = 0 // 현재 시간 주입량
+    public var basalAmount: Double = 0 // Current hour basal amount (U/h)
+    public var basalInjectedAmount: Double = 0 // Current hour injected amount
 
-    // 간식 볼루스 상태
+    // Snack bolus status
     public var snackStatus: UInt8 = 0
     public var snackAmount: Double = 0
     public var snackInjectedAmount: Double = 0
     public var snackSpeed: UInt8 = 0
 
-    // 확장 볼루스 상태
+    // Extended bolus status
     public var squareStatus: UInt8 = 0
-    public var squareTime: UInt16 = 0 // 설정 시간 (10~300분)
+    public var squareTime: UInt16 = 0 // Set duration (10~300 min)
     public var squareInjectedTime: UInt16 = 0
     public var squareAmount: Double = 0
     public var squareInjectedAmount: Double = 0
 
-    // 듀얼 볼루스 상태
+    // Dual bolus status
     public var dualStatus: UInt8 = 0
     public var dualAmount: Double = 0
     public var dualInjectedAmount: Double = 0
@@ -80,47 +80,47 @@ public struct DiaconnPumpStatus {
     public var dualSquareAmount: Double = 0
     public var dualInjectedSquareAmount: Double = 0
 
-    // 최근 주입 이력
-    public var recentKind1: UInt8 = 0 // 1=식사, 2=간식, 3=확장, 4=듀얼
+    // Recent injection history
+    public var recentKind1: UInt8 = 0 // 1=meal, 2=snack, 3=extended, 4=dual
     public var recentTime1: UInt32 = 0
     public var recentAmount1: Double = 0
     public var recentKind2: UInt8 = 0
     public var recentTime2: UInt32 = 0
     public var recentAmount2: Double = 0
 
-    // 오늘 주입 합계
+    // Today injection total
     public var todayBasalAmount: Double = 0
     public var todayMealAmount: Double = 0
     public var todaySnackAmount: Double = 0
 
-    // 현재 기저 프로파일 정보
+    // Current basal profile info
     public var currentBasePattern: UInt8 = 0
     public var currentBaseHour: UInt8 = 0
     public var currentBaseTbBeforeAmount: Double = 0
     public var currentBaseTbAfterAmount: Double = 0
 
-    // 24시간 기저 프로파일 (U/h)
+    // 24-hour basal profile (U/h)
     public var basalProfile: [Double] = Array(repeating: 0, count: 24)
 
-    // 한도 설정
+    // Limit settings
     public var maxBasalPerHour: Double = 0
     public var maxBasal: Double = 0 // maxBasalPerHour * 2.5
     public var maxBolus: Double = 0
     public var maxBolusPerDay: Double = 0
 
-    // 사운드
+    // Sound
     public var beepAndAlarm: UInt8 = 0
     public var alarmIntensity: UInt8 = 0
 
     // LCD
-    public var lcdOnTimeSec: UInt8 = 0 // 1=30초, 2=40초, 3=50초
+    public var lcdOnTimeSec: UInt8 = 0 // 1=30sec, 2=40sec, 3=50sec
 
-    // 언어
-    public var selectedLanguage: UInt8 = 0 // 1=중국어, 2=한국어, 3=영어
+    // Language
+    public var selectedLanguage: UInt8 = 0 // 1=Chinese, 2=Korean, 3=English
 
-    // basePauseStatus: 1=정지(서스펜드), 2=해제(동작중)
+    // basePauseStatus: 1=paused(suspended), 2=released(active)
     public var isSuspended: Bool { basePauseStatus == 1 }
-    // tbStatus: 1=임시기저 중, 2=임시기저 해제 (0 또는 2면 실행 안 함)
+    // tbStatus: 1=temp basal running, 2=temp basal off (0 or 2 means not running)
     public var isTempBasalRunning: Bool { tbStatus == 1 }
 
     public var firmwareVersion: String {
@@ -134,7 +134,7 @@ public struct DiaconnPumpStatus {
     }
 }
 
-/// APS 전체 상태 응답 파싱 (182바이트 대량 패킷)
+/// Parse APS full status response (182-byte big packet)
 func parseBigAPSMainInfoResponse(_ data: Data) -> DiaconnPumpStatus? {
     guard DiaconnPacketDecoder.validatePacket(data) == 0 else { return nil }
     let payload = DiaconnPacketDecoder.getPayload(data)
@@ -160,11 +160,11 @@ func parseBigAPSMainInfoResponse(_ data: Data) -> DiaconnPumpStatus? {
         return v
     }
 
-    // 결과 확인 (성공=16)
+    // Check result (success=16)
     let result = readByte()
     guard Int(result) == DiaconnPacketType.InquireResult.success.rawValue else { return nil }
 
-    // 시스템 상태
+    // System status
     status.remainInsulin = Double(readShort()) / 100.0
     status.remainBattery = Int(readByte())
     status.basePattern = readByte()
@@ -175,7 +175,7 @@ func parseBigAPSMainInfoResponse(_ data: Data) -> DiaconnPumpStatus? {
     status.dualBolusStatus = readByte()
     status.basePauseStatus = readByte()
 
-    // 펌프 시간
+    // Pump time
     status.pumpYear = Int(readByte()) + 2000
     status.pumpMonth = Int(readByte())
     status.pumpDay = Int(readByte())
@@ -183,7 +183,7 @@ func parseBigAPSMainInfoResponse(_ data: Data) -> DiaconnPumpStatus? {
     status.pumpMinute = Int(readByte())
     status.pumpSecond = Int(readByte())
 
-    // 펌프 정보
+    // Pump info
     status.country = readByte()
     status.productType = readByte()
     status.makeYear = readByte()
@@ -194,39 +194,39 @@ func parseBigAPSMainInfoResponse(_ data: Data) -> DiaconnPumpStatus? {
     status.majorVersion = readByte()
     status.minorVersion = readByte()
 
-    // 로그 상태
+    // Log status
     status.lastLogNum = readShort()
     status.wrappingCount = readByte()
 
-    // 볼루스 속도
+    // Bolus speed
     status.bolusSpeed = readByte()
 
-    // 임시 기저 상세
+    // Temp basal detail
     status.tempBasalStatus = readByte()
     status.tempBasalTime = readByte()
     status.tempBasalRateRatio = readShort()
     status.tempBasalElapsedTime = readShort()
 
-    // 기저 상태
+    // Basal status
     status.basalStatus = readByte()
     status.basalHour = readByte()
     status.basalAmount = Double(readShort()) / 100.0
     status.basalInjectedAmount = Double(readShort()) / 100.0
 
-    // 간식 볼루스 상태
+    // Snack bolus status
     status.snackStatus = readByte()
     status.snackAmount = Double(readShort()) / 100.0
     status.snackInjectedAmount = Double(readShort()) / 100.0
     status.snackSpeed = readByte()
 
-    // 확장 볼루스 상태
+    // Extended bolus status
     status.squareStatus = readByte()
     status.squareTime = readShort()
     status.squareInjectedTime = readShort()
     status.squareAmount = Double(readShort()) / 100.0
     status.squareInjectedAmount = Double(readShort()) / 100.0
 
-    // 듀얼 볼루스 상태
+    // Dual bolus status
     status.dualStatus = readByte()
     status.dualAmount = Double(readShort()) / 100.0
     status.dualInjectedAmount = Double(readShort()) / 100.0
@@ -235,7 +235,7 @@ func parseBigAPSMainInfoResponse(_ data: Data) -> DiaconnPumpStatus? {
     status.dualSquareAmount = Double(readShort()) / 100.0
     status.dualInjectedSquareAmount = Double(readShort()) / 100.0
 
-    // 최근 주입 이력
+    // Recent injection history
     status.recentKind1 = readByte()
     status.recentTime1 = readInt()
     status.recentAmount1 = Double(readShort()) / 100.0
@@ -243,49 +243,49 @@ func parseBigAPSMainInfoResponse(_ data: Data) -> DiaconnPumpStatus? {
     status.recentTime2 = readInt()
     status.recentAmount2 = Double(readShort()) / 100.0
 
-    // 오늘 주입 합계
+    // Today injection total
     status.todayBasalAmount = Double(readShort()) / 100.0
     status.todayMealAmount = Double(readShort()) / 100.0
     status.todaySnackAmount = Double(readShort()) / 100.0
 
-    // 현재 기저 프로파일 정보
+    // Current basal profile info
     status.currentBasePattern = readByte()
     status.currentBaseHour = readByte()
     status.currentBaseTbBeforeAmount = Double(readShort()) / 100.0
     status.currentBaseTbAfterAmount = Double(readShort()) / 100.0
 
-    // 24시간 기저 프로파일
+    // 24-hour basal profile
     for i in 0 ..< 24 {
         status.basalProfile[i] = Double(readShort()) / 100.0
     }
 
-    // 한도 설정
+    // Limit settings
     status.maxBasalPerHour = Double(readShort()) / 100.0
     status.maxBasal = status.maxBasalPerHour * 2.5
 
-    _ = readByte() // mealLimitTime (사용하지 않음)
+    _ = readByte() // mealLimitTime (unused)
     status.maxBolus = Double(readShort()) / 100.0
     status.maxBolusPerDay = Double(readShort()) / 100.0
 
-    // 사운드
+    // Sound
     status.beepAndAlarm = readByte() - 1
     status.alarmIntensity = readByte() - 1
 
     // LCD
     status.lcdOnTimeSec = readByte()
 
-    // 언어
+    // Language
     status.selectedLanguage = readByte()
 
     return status
 }
 
-// MARK: - 사운드 설정 (msgType: 0x11)
+// MARK: - Sound setting (msgType: 0x11)
 
-/// 사운드(알림) 설정
+/// Sound (notification) setting
 /// - Parameters:
-///   - beepAndAlarm: 0=소리, 1=무음, 2=진동 (펌프 전송 시 +1)
-///   - alarmIntensity: 알람 강도 (펌프 전송 시 +1)
+///   - beepAndAlarm: 0=sound, 1=mute, 2=vibration (add +1 when sending to pump)
+///   - alarmIntensity: alarm intensity (add +1 when sending to pump)
 func generateSoundSettingPacket(beepAndAlarm: UInt8, alarmIntensity: UInt8) -> Data {
     var payload = Data()
     payload.append(beepAndAlarm + 1)
@@ -296,7 +296,7 @@ func generateSoundSettingPacket(beepAndAlarm: UInt8, alarmIntensity: UInt8) -> D
     )
 }
 
-/// 사운드 설정 응답 파싱 (msgType: 0x91)
+/// Parse sound setting response (msgType: 0x91)
 struct SoundSettingResponse {
     let result: UInt8
     let otpNumber: UInt32
@@ -313,9 +313,9 @@ func parseSoundSettingResponse(_ data: Data) -> SoundSettingResponse? {
     )
 }
 
-// MARK: - 시간 설정 (msgType: 0x0F)
+// MARK: - Time setting (msgType: 0x0F)
 
-/// 펌프 시간 설정
+/// Set pump time
 func generateTimeSettingPacket(date: Date) -> Data {
     let calendar = Calendar(identifier: .gregorian)
     let components = calendar.dateComponents(in: TimeZone.current, from: date)
@@ -334,7 +334,7 @@ func generateTimeSettingPacket(date: Date) -> Data {
     )
 }
 
-/// 시간 설정 응답 파싱 (msgType: 0x8F)
+/// Parse time setting response (msgType: 0x8F)
 struct TimeSettingResponse {
     let result: UInt8
     let otpNumber: UInt32
@@ -353,13 +353,13 @@ func parseTimeSettingResponse(_ data: Data) -> TimeSettingResponse? {
     )
 }
 
-// MARK: - 시간 조회 (msgType: 0x4F)
+// MARK: - Time inquiry (msgType: 0x4F)
 
 func generateTimeInquirePacket() -> Data {
     DiaconnPacketEncoder.encode(msgType: DiaconnPacketType.TIME_INQUIRE)
 }
 
-// MARK: - 시리얼 번호 조회 (msgType: 0x53)
+// MARK: - Serial number inquiry (msgType: 0x53)
 
 func generateSerialNumInquirePacket() -> Data {
     DiaconnPacketEncoder.encode(msgType: DiaconnPacketType.SERIAL_NUM_INQUIRE)
@@ -409,33 +409,33 @@ func parseSerialNumInquireResponse(_ data: Data) -> SerialNumInquireResponse? {
     )
 }
 
-// MARK: - 로그 상태 조회 (msgType: 0x46)
+// MARK: - Log status inquiry (msgType: 0x46)
 
 func generateLogStatusInquirePacket() -> Data {
     DiaconnPacketEncoder.encode(msgType: DiaconnPacketType.LOG_STATUS_INQUIRE)
 }
 
-// MARK: - 인카네이션 조회 (msgType: 0x45)
+// MARK: - Incarnation inquiry (msgType: 0x45)
 
 func generateIncarnationInquirePacket() -> Data {
     DiaconnPacketEncoder.encode(msgType: DiaconnPacketType.INCARNATION_INQUIRE)
 }
 
-// MARK: - 임시 기저 상태 조회 (msgType: 0x4A)
+// MARK: - Temp basal status inquiry (msgType: 0x4A)
 
 func generateTempBasalInquirePacket() -> Data {
     DiaconnPacketEncoder.encode(msgType: DiaconnPacketType.TEMP_BASAL_INQUIRE)
 }
 
-// MARK: - 로그 상태 조회 (msgType: 0x56, 응답: 0x96)
+// MARK: - Log status inquiry (msgType: 0x56, response: 0x96)
 
-/// 로그 상태 (lastLogNum, wrappingCount)
+/// Log status (lastLogNum, wrappingCount)
 public struct DiaconnLogStatus {
     public var lastLogNum: UInt16 = 0
     public var wrappingCount: UInt8 = 0
 }
 
-/// LogStatusInquire 응답 파싱: result(1) + lastLogNum(2 LE) + wrappingCount(1)
+/// Parse LogStatusInquire response: result(1) + lastLogNum(2 LE) + wrappingCount(1)
 public func parseLogStatusResponse(_ data: Data) -> DiaconnLogStatus? {
     guard DiaconnPacketDecoder.validatePacket(data) == 0 else { return nil }
     let payload = DiaconnPacketDecoder.getPayload(data)
@@ -450,58 +450,58 @@ public func parseLogStatusResponse(_ data: Data) -> DiaconnLogStatus? {
     return status
 }
 
-// MARK: - 대량 로그 조회 (msgType: 0x72, 응답: 0xB2, 182바이트)
+// MARK: - Big log inquiry (msgType: 0x72, response: 0xB2, 182 bytes)
 
-/// 로그 이벤트 종류 (AndroidAPS PumpLogUtil.getKind 기준 — typeAndKind 바이트의 하위 6비트)
+/// Log event kinds (based on AndroidAPS PumpLogUtil.getKind — lower 6 bits of typeAndKind byte)
 public enum DiaconnLogKind: UInt8 {
-    case resetSys = 0x01 // 시스템 리셋 (배터리 교체 등)
-    case suspend = 0x03 // 일시정지 시작
-    case suspendRelease = 0x04 // 일시정지 해제
-    case mealBolusSuccess = 0x08 // 식사주입 성공
-    case mealBolusFail = 0x09 // 식사주입 실패
-    case normalBolusSuccess = 0x0A // 일반주입 성공
-    case normalBolusFail = 0x0B // 일반주입 실패
-    case squareBolusSet = 0x0C // 스퀘어주입 설정
-    case squareBolusSuccess = 0x0D // 스퀘어주입 성공
-    case squareBolusFail = 0x0E // 스퀘어주입 실패
-    case dualBolusSet = 0x0F // 듀얼주입 설정
-    case dualBolusSuccess = 0x10 // 듀얼주입 성공
-    case dualBolusFail = 0x11 // 듀얼주입 실패
-    case tbStart = 0x12 // 임시기저 시작
-    case tbStop = 0x13 // 임시기저 중지
-    case changeTube = 0x18 // 튜브 교체 (프라이밍)
-    case changeInjector = 0x1A // 주사기 교체 (인슐린 교체)
-    case changeNeedle = 0x1C // 바늘 교체 (캐뉼라 교체)
-    case alarmBattery = 0x28 // 배터리 부족 알람
-    case alarmBlock = 0x29 // 주입 막힘 알람
-    case alarmShortAge = 0x2A // 인슐린 부족 알람
-    case hourBasal = 0x2C // 1시간 기저 주입량
-    case dualNormal = 0x35 // 듀얼(일반) 주입량
+    case resetSys = 0x01 // System reset (battery replacement, etc.)
+    case suspend = 0x03 // Suspend start
+    case suspendRelease = 0x04 // Suspend release
+    case mealBolusSuccess = 0x08 // Meal bolus success
+    case mealBolusFail = 0x09 // Meal bolus fail
+    case normalBolusSuccess = 0x0A // Normal bolus success
+    case normalBolusFail = 0x0B // Normal bolus fail
+    case squareBolusSet = 0x0C // Square bolus set
+    case squareBolusSuccess = 0x0D // Square bolus success
+    case squareBolusFail = 0x0E // Square bolus fail
+    case dualBolusSet = 0x0F // Dual bolus set
+    case dualBolusSuccess = 0x10 // Dual bolus success
+    case dualBolusFail = 0x11 // Dual bolus fail
+    case tbStart = 0x12 // Temp basal start
+    case tbStop = 0x13 // Temp basal stop
+    case changeTube = 0x18 // Tube change (priming)
+    case changeInjector = 0x1A // Injector change (insulin replacement)
+    case changeNeedle = 0x1C // Needle change (cannula replacement)
+    case alarmBattery = 0x28 // Low battery alarm
+    case alarmBlock = 0x29 // Injection blockage alarm
+    case alarmShortAge = 0x2A // Low insulin alarm
+    case hourBasal = 0x2C // Hourly basal injection amount
+    case dualNormal = 0x35 // Dual (normal) injection amount
     case unknown = 0xFF
 }
 
-/// 로그 항목 하나 (AndroidAPS BigLogInquireResponsePacket 구조 기준)
+/// Single log entry (based on AndroidAPS BigLogInquireResponsePacket structure)
 public struct DiaconnLogEntry {
     public var logNum: UInt16
     public var wrapCount: UInt8
     public var logKind: DiaconnLogKind
-    /// logData[0-3]: 4바이트 LE Unix timestamp (UTC)
+    /// logData[0-3]: 4-byte LE Unix timestamp (UTC)
     public var date: Date
-    /// 실제 주입량 (U) — injectAmount / 100
+    /// Actual injected amount (U) — injectAmount / 100
     public var injectAmount: Double
-    /// 설정 주입량 (U) — setAmount / 100
+    /// Set amount (U) — setAmount / 100
     public var setAmount: Double
-    /// 임시기저 rate/ratio 원시값 (getTbInjectRateRatio)
-    /// - <  50000: 절대값 모드 → (값 - 1000) / 100.0 U/h
-    /// - >= 50000: 퍼센트 모드 → (값 - 50000) % of 기저량
+    /// Temp basal rate/ratio raw value (getTbInjectRateRatio)
+    /// - <  50000: absolute mode -> (value - 1000) / 100.0 U/h
+    /// - >= 50000: percent mode -> (value - 50000) % of basal amount
     public var tbRateRatio: UInt16
-    /// 임시기저 시간 단위 (1단위 = 15분)
+    /// Temp basal time unit (1 unit = 15 min)
     public var tbTime: Int
-    /// 스퀘어/듀얼 볼루스 주입시간 단위 (1단위 = 10분), 식사/일반은 직접 분
+    /// Square/dual bolus injection time unit (1 unit = 10 min), meal/normal is direct minutes
     public var injectTimeUnit: Int
 }
 
-/// BIG_LOG_INQUIRE 요청 패킷 생성
+/// Generate BIG_LOG_INQUIRE request packet
 /// payload: start(2 LE) + end(2 LE) + delay(1)
 func generateBigLogInquirePacket(start: UInt16, end: UInt16, delay: UInt8 = 100) -> Data {
     var payload = Data()
@@ -511,14 +511,14 @@ func generateBigLogInquirePacket(start: UInt16, end: UInt16, delay: UInt8 = 100)
     return DiaconnPacketEncoder.encode(msgType: DiaconnPacketType.BIG_LOG_INQUIRE, payload: payload)
 }
 
-/// BIG_LOG_INQUIRE_RESPONSE (0xB2, 182바이트) 파싱
-/// payload 구조 (AndroidAPS BigLogInquireResponsePacket 기준):
-///   [0]   result (1바이트, 16=success)
-///   [1]   logLength (1바이트, 로그 갯수)
-///   [2..] 로그 항목 반복 (항목당 15바이트):
+/// Parse BIG_LOG_INQUIRE_RESPONSE (0xB2, 182 bytes)
+/// Payload structure (based on AndroidAPS BigLogInquireResponsePacket):
+///   [0]   result (1 byte, 16=success)
+///   [1]   logLength (1 byte, number of log entries)
+///   [2..] repeated log entries (15 bytes each):
 ///     +0  wrapCount  (1)
 ///     +1  logNum     (2, LE)
-///     +3  logData    (12): [0-3]=LE Unix timestamp, [4]=type(2b)+kind(6b), [5-11]=로그별 필드
+///     +3  logData    (12): [0-3]=LE Unix timestamp, [4]=type(2b)+kind(6b), [5-11]=per-log fields
 public func parseBigLogInquireResponse(_ data: Data) -> [DiaconnLogEntry]? {
     let validationResult = DiaconnPacketDecoder.validatePacket(data)
     guard validationResult == 0 else {
@@ -547,6 +547,8 @@ public func parseBigLogInquireResponse(_ data: Data) -> [DiaconnLogEntry]? {
     let entrySize = 15
     let dataStart = 2
     var entries: [DiaconnLogEntry] = []
+    // Pump stores local time as Unix timestamp — subtract timezone offset once
+    let tzOffset = TimeInterval(TimeZone.current.secondsFromGMT())
 
     for i in 0 ..< logLength {
         let base = dataStart + i * entrySize
@@ -557,15 +559,13 @@ public func parseBigLogInquireResponse(_ data: Data) -> [DiaconnLogEntry]? {
 
         let d = base + 3
 
-        // [0-3]: 4바이트 LE timestamp (펌프 로컬 시간 기준 epoch)
         let tsRaw = UInt32(payload[d])
             | (UInt32(payload[d + 1]) << 8)
             | (UInt32(payload[d + 2]) << 16)
             | (UInt32(payload[d + 3]) << 24)
-        // 펌프는 로컬 시간으로 timestamp를 저장 → timezone offset을 빼서 UTC로 변환
-        let date = Date(timeIntervalSince1970: TimeInterval(tsRaw) - TimeInterval(TimeZone.current.secondsFromGMT()))
+        let date = Date(timeIntervalSince1970: TimeInterval(tsRaw) - tzOffset)
 
-        // [4]: type(상위2비트) + kind(하위6비트)
+        // [4]: type(upper 2 bits) + kind(lower 6 bits)
         let rawKind = payload[d + 4] & 0x3F
         let kind = DiaconnLogKind(rawValue: rawKind) ?? .unknown
 
@@ -611,7 +611,7 @@ public func parseBigLogInquireResponse(_ data: Data) -> [DiaconnLogEntry]? {
             injectTimeUnit = Int(payload[d + 9])
 
         case .tbStart:
-            // tbTime: 1단위=15분, tbRateRatio: 절대값 or 퍼센트 인코딩
+            // tbTime: 1 unit = 15 min, tbRateRatio: absolute or percent encoding
             tbTime = Int(payload[d + 5])
             tbRateRatio = DiaconnPacketDecoder.readShort(payload, offset: d + 6)
 
