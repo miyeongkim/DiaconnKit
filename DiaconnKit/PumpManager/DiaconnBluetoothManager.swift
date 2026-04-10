@@ -490,6 +490,14 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
             log.info("Bolus result report")
             handleBolusResultReport(payload)
 
+        case DiaconnPacketType.INJECTION_EXTENDED_BOLUS_RESULT_REPORT:
+            log.info("Extended bolus result report")
+            handleBolusResultReport(payload)
+
+        case DiaconnPacketType.BATTERY_SHORTAGE_REPORT:
+            log.error("Battery shortage report")
+            pumpManager?.notifyAlert(.lowBattery(payload))
+
         case DiaconnPacketType.INJECTION_BLOCK_REPORT:
             log.error("Injection block report (occlusion)")
             pumpManager?.notifyBolusError()
