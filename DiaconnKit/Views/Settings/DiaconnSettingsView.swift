@@ -437,6 +437,13 @@ struct DiaconnSettingsView: View {
 
             Section(header: Text("Debug")) {
                 HStack {
+                    Text("Incarnation")
+                    Spacer()
+                    Text("\(viewModel.incarnation)")
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
                     Text("Pump Log")
                     Spacer()
                     Text(

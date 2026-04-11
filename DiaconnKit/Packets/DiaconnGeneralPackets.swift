@@ -415,10 +415,20 @@ func generateLogStatusInquirePacket() -> Data {
     DiaconnPacketEncoder.encode(msgType: DiaconnPacketType.LOG_STATUS_INQUIRE)
 }
 
-// MARK: - Incarnation inquiry (msgType: 0x45)
+// MARK: - Incarnation inquiry (msgType: 0x7A, response: 0xBA)
 
 func generateIncarnationInquirePacket() -> Data {
     DiaconnPacketEncoder.encode(msgType: DiaconnPacketType.INCARNATION_INQUIRE)
+}
+
+/// Parse Incarnation inquiry response: result(1) + incarnationNum(2 LE, 0~65535)
+func parseIncarnationResponse(_ data: Data) -> UInt16? {
+    guard DiaconnPacketDecoder.validatePacket(data) == 0 else { return nil }
+    let payload = DiaconnPacketDecoder.getPayload(data)
+    guard payload.count >= 3 else { return nil }
+    let result = payload[0]
+    guard result == UInt8(DiaconnPacketType.InquireResult.success.rawValue) else { return nil }
+    return DiaconnPacketDecoder.readShort(payload, offset: 1)
 }
 
 // MARK: - Temp basal status inquiry (msgType: 0x4A)

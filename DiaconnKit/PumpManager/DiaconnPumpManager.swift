@@ -36,6 +36,7 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
 
     private let log = DiaconnLogger(category: "DiaconnPumpManager")
     private let pumpQueue = DispatchQueue(label: "com.diaconkit.pumpmanager", qos: .userInitiated)
+    private let backgroundTask = DiaconnBackgroundTask()
 
     // MARK: - Init
 
@@ -44,6 +45,29 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
         oldState = DiaconnPumpManagerState(rawValue: state.rawValue)
         bluetooth = DiaconnBluetoothManager()
         bluetooth.pumpManager = self
+
+        let nc = NotificationCenter.default
+        nc.addObserver(
+            self,
+            selector: #selector(appMovedToBackground),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        nc.addObserver(
+            self,
+            selector: #selector(appMovedToForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
+    }
+
+    @objc private func appMovedToBackground() {
+        log.info("App moved to background — starting silent audio")
+        backgroundTask.start()
+    }
+
+    @objc private func appMovedToForeground() {
+        backgroundTask.stop()
     }
 
     public required convenience init?(rawState: PumpManager.RawStateValue) {
@@ -260,6 +284,45 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
         }
     }
 
+    // MARK: - Pump Identity Check
+
+    /// Detect pump replacement or factory reset via serial number and incarnation.
+    /// Must be called on pumpQueue.
+    private func checkPumpIdentity() {
+        // Query incarnation
+        var currentIncarnation: UInt16 = state.syncedIncarnation
+        if let incarnationData = try? bluetooth.sendPacket(
+            msgType: DiaconnPacketType.INCARNATION_INQUIRE,
+            timeout: 10.0
+        ), let incarnation = parseIncarnationResponse(incarnationData) {
+            currentIncarnation = incarnation
+            log.info("Incarnation: \(incarnation) (synced: \(state.syncedIncarnation))")
+        } else {
+            log.error("Incarnation inquiry failed, skipping identity check")
+            return
+        }
+
+        let serialChanged = state.syncedSerialNumber != nil
+            && state.serialNumber != nil
+            && state.serialNumber != state.syncedSerialNumber
+        let incarnationChanged = state.syncedIncarnation != 0
+            && currentIncarnation != state.syncedIncarnation
+
+        if serialChanged || incarnationChanged {
+            let reason = serialChanged ? "serial changed" : "incarnation changed"
+            log.info("Pump \(reason), resetting log cursor")
+            state.storedLastLogNum = 0
+            state.storedWrappingCount = 0
+            state.isFirstLogSync = true
+        }
+
+        // Update synced identifiers
+        if let serial = state.serialNumber {
+            state.syncedSerialNumber = serial
+        }
+        state.syncedIncarnation = currentIncarnation
+    }
+
     // MARK: - Time Synchronization
 
     /// Check if time sync is needed (>60s drift, skip only during bolus)
@@ -403,48 +466,20 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
                     delegate.pumpManager(self, didReadReservoirValue: reservoirLevel, at: now) { _ in }
                 }
 
-                // If TBR is running, report immediately as pump event (for home screen update)
-                if pumpStatus.isTempBasalRunning, let tbUnits = self.state.tempBasalUnits,
-                   let tbDuration = self.state.tempBasalDuration
-                {
-                    let elapsed = TimeInterval(self.state.tempBasalElapsedTime) * 60
-                    let tbStart = now.addingTimeInterval(-elapsed)
-                    let tbEnd = tbStart.addingTimeInterval(tbDuration)
-                    let dose = DoseEntry(
-                        type: .tempBasal,
-                        startDate: tbStart,
-                        endDate: tbEnd,
-                        value: tbUnits,
-                        unit: .unitsPerHour,
-                        automatic: true
-                    )
-                    var raw = Data()
-                    raw.append(contentsOf: [0xFE, 0xFE, 0xFE]) // Generated from fetchPumpStatus
-                    let event = NewPumpEvent(date: tbStart, dose: dose, raw: raw, title: "Temp Basal")
-                    self.pumpDelegate.notify { delegate in
-                        delegate?.pumpManager(
-                            self,
-                            hasNewPumpEvents: [event],
-                            lastReconciliation: now,
-                            replacePendingEvents: false
-                        ) { _ in }
-                    }
-                }
-
                 // Delay between commands to avoid otherOperationInProgress from pump
-                Thread.sleep(forTimeInterval: 2.0)
+                Thread.sleep(forTimeInterval: 1.0)
 
-                // Auto time sync (>60s drift or timezone change) — runs on pumpQueue before completion
+                // Detect pump replacement or factory reset (only during 5-min cycle, not every syncLogHistory)
+                self.checkPumpIdentity()
+
+                // Auto time sync (>60s drift or timezone change)
                 if self.shouldSyncTime() || TimeZone.current != self.state.pumpTimeZone {
                     self.syncTimeOnQueue()
-                    Thread.sleep(forTimeInterval: 2.0)
+                    Thread.sleep(forTimeInterval: 1.0)
                 }
 
                 // Fetch pump logs and store in Trio history
                 self.syncLogHistory()
-
-                // Delay before returning to give pump time to finish processing
-                Thread.sleep(forTimeInterval: 2.0)
 
                 completion(.success(pumpStatus))
 
@@ -821,30 +856,7 @@ extension DiaconnPumpManager: PumpManager {
                 }
                 self.notifyStateDidChange()
 
-                // Report TBR event immediately (for home screen update)
-                if unitsPerHour > 0 || durationMinutes > 0 {
-                    let now = Date()
-                    let tbDose = DoseEntry(
-                        type: .tempBasal,
-                        startDate: now,
-                        endDate: now.addingTimeInterval(duration),
-                        value: unitsPerHour,
-                        unit: .unitsPerHour,
-                        automatic: true
-                    )
-                    var raw = Data()
-                    raw.append(contentsOf: [0xFF, 0xFF, 0xFF]) // Mark event generated from enact
-                    let event = NewPumpEvent(date: now, dose: tbDose, raw: raw, title: "Temp Basal")
-                    self.pumpDelegate.notify { delegate in
-                        delegate?.pumpManager(
-                            self,
-                            hasNewPumpEvents: [event],
-                            lastReconciliation: now,
-                            replacePendingEvents: false
-                        ) { _ in }
-                    }
-                }
-
+                // TBR events are recorded via syncLogHistory (pump log based)
                 self.syncLogHistory()
 
                 completion(nil)

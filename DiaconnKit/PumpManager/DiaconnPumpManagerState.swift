@@ -97,6 +97,8 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
     internal var isFirstLogSync: Bool = true
     /// Pump serial at log sync time — for detecting different pump connection
     internal var syncedSerialNumber: String?
+    /// Pump incarnation number (0~65535) — for detecting factory reset
+    internal var syncedIncarnation: UInt16 = 0
 
     // MARK: - OTP (for two-step commit)
 
@@ -198,6 +200,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         storedWrappingCount = UInt8((rawValue["storedWrappingCount"] as? Int) ?? 0)
         isFirstLogSync = rawValue["isFirstLogSync"] as? Bool ?? true
         syncedSerialNumber = rawValue["syncedSerialNumber"] as? String
+        syncedIncarnation = UInt16((rawValue["syncedIncarnation"] as? Int) ?? 0)
 
         if let rawInsulinType = rawValue["insulinType"] as? InsulinType.RawValue {
             insulinType = InsulinType(rawValue: rawInsulinType)
@@ -254,6 +257,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         value["storedWrappingCount"] = Int(storedWrappingCount)
         value["isFirstLogSync"] = isFirstLogSync
         value["syncedSerialNumber"] = syncedSerialNumber
+        value["syncedIncarnation"] = Int(syncedIncarnation)
 
         return value
     }
@@ -396,6 +400,7 @@ extension DiaconnPumpManagerState: CustomDebugStringConvertible {
             "* bolusState: \(bolusState.rawValue)",
             "* basalDeliveryOrdinal: \(basalDeliveryOrdinal)",
             "* firmwareVersion: \(firmwareVersion ?? "<EMPTY>")",
+            "* incarnation: \(syncedIncarnation)",
             "* maxBolus: \(maxBolus)U",
             "* maxBasalPerHour: \(maxBasalPerHour)U/h"
         ].joined(separator: "\n")

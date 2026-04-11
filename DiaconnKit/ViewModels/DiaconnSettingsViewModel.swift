@@ -29,6 +29,7 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
     @Published var storedWrapCount: UInt8 = 0
     @Published var editStoredLogNum: String = ""
     @Published var editStoredWrapCount: String = ""
+    @Published var incarnation: UInt16 = 0
     @Published var cannulaDate: Date?
     @Published var reservoirDate: Date?
     @Published var activeAlert: DiaconnPumpManagerAlert?
@@ -71,6 +72,7 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
         pumpWrapCount = state.pumpWrappingCount
         storedLogNum = state.storedLastLogNum
         storedWrapCount = state.storedWrappingCount
+        incarnation = state.syncedIncarnation
         cannulaDate = state.cannulaDate
         reservoirDate = state.reservoirDate
         activeAlert = pumpManager?.activeAlert
