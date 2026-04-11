@@ -61,9 +61,9 @@ public enum DiaconnPumpManagerAlert: Hashable, Codable {
 
     var raw: Data {
         switch self {
-        case let .occlusion(raw),
-             let .insulinLack(raw),
-             let .lowBattery(raw):
+        case let .insulinLack(raw),
+             let .lowBattery(raw),
+             let .occlusion(raw):
             return raw
         }
     }

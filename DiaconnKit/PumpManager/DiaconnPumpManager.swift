@@ -269,43 +269,45 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
     }
 
     /// Sync pump clock to current system time (skip only during bolus)
+    /// Must be called on pumpQueue
+    private func syncTimeOnQueue() {
+        guard state.bolusState == .noBolus else {
+            log.info("syncTime skipped: bolus in progress")
+            return
+        }
+
+        do {
+            let packet = generateTimeSettingPacket(date: Date())
+            log.info("syncTime: sending TIME_SETTING (0x0F)")
+
+            guard let responseData = try bluetooth.writeAndWait(packet: packet) else {
+                throw DiaconnPumpManagerError.communicationFailure
+            }
+
+            guard let response = parseTimeSettingResponse(responseData), response.isSuccess else {
+                throw DiaconnPumpManagerError.communicationFailure
+            }
+
+            try confirmSettingCommand(
+                reqMsgType: DiaconnPacketType.TIME_SETTING,
+                otpNumber: response.otpNumber
+            )
+
+            state.pumpTime = Date()
+            state.pumpTimeSyncedAt = Date()
+            state.pumpTimeZone = TimeZone.current
+            notifyStateDidChange()
+            log.info("syncTime: success")
+        } catch {
+            log.error("syncTime failed: \(error)")
+        }
+    }
+
+    /// Public wrapper for external callers
     public func syncTime(completion: @escaping (Error?) -> Void) {
         pumpQueue.async { [weak self] in
-            guard let self = self else { return }
-
-            guard self.state.bolusState == .noBolus else {
-                self.log.info("syncTime skipped: bolus in progress")
-                completion(nil) // Not an error, just skip
-                return
-            }
-
-            do {
-                let packet = generateTimeSettingPacket(date: Date())
-                self.log.info("syncTime: sending TIME_SETTING (0x0F)")
-
-                guard let responseData = try self.bluetooth.writeAndWait(packet: packet) else {
-                    throw DiaconnPumpManagerError.communicationFailure
-                }
-
-                guard let response = parseTimeSettingResponse(responseData), response.isSuccess else {
-                    throw DiaconnPumpManagerError.communicationFailure
-                }
-
-                try self.confirmSettingCommand(
-                    reqMsgType: DiaconnPacketType.TIME_SETTING,
-                    otpNumber: response.otpNumber
-                )
-
-                self.state.pumpTime = Date()
-                self.state.pumpTimeSyncedAt = Date()
-                self.state.pumpTimeZone = TimeZone.current
-                self.notifyStateDidChange()
-                self.log.info("syncTime: success")
-                completion(nil)
-            } catch {
-                self.log.error("syncTime failed: \(error)")
-                completion(error)
-            }
+            self?.syncTimeOnQueue()
+            completion(nil)
         }
     }
 
@@ -429,8 +431,20 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
                     }
                 }
 
+                // Delay between commands to avoid otherOperationInProgress from pump
+                Thread.sleep(forTimeInterval: 2.0)
+
+                // Auto time sync (>60s drift or timezone change) — runs on pumpQueue before completion
+                if self.shouldSyncTime() || TimeZone.current != self.state.pumpTimeZone {
+                    self.syncTimeOnQueue()
+                    Thread.sleep(forTimeInterval: 2.0)
+                }
+
                 // Fetch pump logs and store in Trio history
                 self.syncLogHistory()
+
+                // Delay before returning to give pump time to finish processing
+                Thread.sleep(forTimeInterval: 2.0)
 
                 completion(.success(pumpStatus))
 
@@ -567,22 +581,7 @@ extension DiaconnPumpManager: PumpManager {
             switch result {
             case .success:
                 self?.log.info("Pump status updated successfully")
-                // Auto time sync: clock drift >60s or timezone change
-                if self?.shouldSyncTime() == true {
-                    self?.syncTime { error in
-                        if let error = error {
-                            self?.log.error("Auto time sync failed: \(error)")
-                        }
-                    }
-                } else if let self = self, TimeZone.current != self.state.pumpTimeZone,
-                          self.state.bolusState == .noBolus
-                {
-                    self.syncTime { error in
-                        if let error = error {
-                            self.log.error("Auto timezone sync failed: \(error)")
-                        }
-                    }
-                }
+                // Time sync now runs inside fetchPumpStatus on pumpQueue, before completion
                 completion?(self?.state.lastStatusDate)
             case let .failure(error):
                 self?.log.error("Failed to update pump status: \(error)")
