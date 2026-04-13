@@ -15,6 +15,7 @@
 		6CEEFB2F2F7526B400299A9A /* DiaconnKit.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 6C4920A22F627A2600B88D35 /* DiaconnKit.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		6CEEFB342F7526BB00299A9A /* LoopKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6C4921D02F6A8C0000B88D35 /* LoopKit.framework */; };
 		6CEEFB362F7526BB00299A9A /* LoopKitUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 6C4921D12F6A8C0000B88D35 /* LoopKitUI.framework */; };
+		AA000001AAAA000100000001 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = AA000001AAAA000100000002 /* Localizable.xcstrings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,6 +63,7 @@
 		6C4921012F62ACCA00B88D35 /* DiaconnKitPluginTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DiaconnKitPluginTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6C4921D02F6A8C0000B88D35 /* LoopKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = LoopKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		6C4921D12F6A8C0000B88D35 /* LoopKitUI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; path = LoopKitUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA000001AAAA000100000002 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -83,6 +85,11 @@
 		6C4921052F62ACCA00B88D35 /* DiaconnKitPluginTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = DiaconnKitPluginTests;
+			sourceTree = "<group>";
+		};
+		AA000001AAAA000100000004 /* DiaconnKitUI */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = DiaconnKitUI;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -130,9 +137,11 @@
 			isa = PBXGroup;
 			children = (
 				6C4920A42F627A2600B88D35 /* DiaconnKit */,
+				AA000001AAAA000100000004 /* DiaconnKitUI */,
 				6C4920B12F627A2600B88D35 /* DiaconnKitTests */,
 				6C4920F82F62ACCA00B88D35 /* DiaconnKitPlugin */,
 				6C4921052F62ACCA00B88D35 /* DiaconnKitPluginTests */,
+				AA000001AAAA000100000003 /* Localization */,
 				6C4921CC2F6A8BF700B88D35 /* Frameworks */,
 				6C4920A32F627A2600B88D35 /* Products */,
 			);
@@ -156,6 +165,14 @@
 				6C4921D12F6A8C0000B88D35 /* LoopKitUI.framework */,
 			);
 			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		AA000001AAAA000100000003 /* Localization */ = {
+			isa = PBXGroup;
+			children = (
+				AA000001AAAA000100000002 /* Localizable.xcstrings */,
+			);
+			path = Localization;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -193,6 +210,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				6C4920A42F627A2600B88D35 /* DiaconnKit */,
+				AA000001AAAA000100000004 /* DiaconnKitUI */,
 			);
 			name = DiaconnKit;
 			packageProductDependencies = (
@@ -325,6 +343,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AA000001AAAA000100000001 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
