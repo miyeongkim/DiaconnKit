@@ -124,8 +124,12 @@ struct DiaconnSettingsView: View {
                         .foregroundColor(.primary)
                     Spacer()
                     HStack(spacing: 6) {
-                        Text(viewModel.isConnected ? "Connected" : "Disconnected")
-                            .foregroundColor(.secondary)
+                        Text(
+                            viewModel
+                                .isConnected ? LocalizedString("Connected", comment: "") :
+                                LocalizedString("Disconnected", comment: "")
+                        )
+                        .foregroundColor(.secondary)
                         Circle()
                             .fill(viewModel.isConnected ? Color.green : Color.red)
                             .frame(width: 10, height: 10)
@@ -338,7 +342,7 @@ struct DiaconnSettingsView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Max Basal")
+                        Text(LocalizedString("Max Basal", comment: "Max basal label"))
                         Spacer()
                         Text(
                             String(
@@ -349,7 +353,10 @@ struct DiaconnSettingsView: View {
                         .foregroundColor(.secondary)
                     }
                     Text(
-                        "Maximum basal insulin amount that can be delivered per hour."
+                        LocalizedString(
+                            "Maximum basal insulin amount that can be delivered per hour.",
+                            comment: "Max basal description"
+                        )
                     )
                     .font(.footnote)
                     .foregroundColor(.secondary)
@@ -357,7 +364,7 @@ struct DiaconnSettingsView: View {
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        Text("Max Bolus")
+                        Text(LocalizedString("Max Bolus", comment: "Max bolus label"))
                         Spacer()
                         Text(
                             String(format: "%.1f U", viewModel.maxBolus)
@@ -365,7 +372,10 @@ struct DiaconnSettingsView: View {
                         .foregroundColor(.secondary)
                     }
                     Text(
-                        "Maximum insulin amount that can be delivered per single bolus."
+                        LocalizedString(
+                            "Maximum insulin amount that can be delivered per single bolus.",
+                            comment: "Max bolus description"
+                        )
                     )
                     .font(.footnote)
                     .foregroundColor(.secondary)
@@ -418,7 +428,10 @@ struct DiaconnSettingsView: View {
                         )
                         .foregroundColor(.secondary)
                     }
-                    Text("Sum of basal, meal bolus, and normal bolus delivered today.")
+                    Text(LocalizedString(
+                        "Sum of basal, meal bolus, and normal bolus delivered today.",
+                        comment: "Today total delivery description"
+                    ))
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }

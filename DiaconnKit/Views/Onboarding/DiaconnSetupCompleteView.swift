@@ -1,3 +1,4 @@
+import LoopKit
 import SwiftUI
 
 struct DiaconnSetupCompleteView: View {
@@ -12,11 +13,14 @@ struct DiaconnSetupCompleteView: View {
                 .frame(width: 80, height: 80)
                 .foregroundColor(.green)
 
-            Text("Setup Complete")
+            Text(LocalizedString("Setup Complete", comment: "Setup complete title"))
                 .font(.largeTitle)
                 .fontWeight(.bold)
 
-            Text("The Diaconn G8 pump has been successfully connected.\n\nTrio will automatically manage insulin delivery.")
+            Text(LocalizedString(
+                "The Diaconn G8 pump has been successfully connected.\n\nTrio will automatically manage insulin delivery.",
+                comment: "Setup complete description"
+            ))
                 .font(.body)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
@@ -24,7 +28,7 @@ struct DiaconnSetupCompleteView: View {
             Spacer()
 
             Button(action: finish) {
-                Text("Done")
+                Text(LocalizedString("Done", comment: "Done button"))
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -35,6 +39,6 @@ struct DiaconnSetupCompleteView: View {
             .padding(.horizontal, 32)
             .padding(.bottom, 32)
         }
-        .navigationTitle("Setup Complete")
+        .navigationTitle(LocalizedString("Setup Complete", comment: "Setup complete navigation title"))
     }
 }

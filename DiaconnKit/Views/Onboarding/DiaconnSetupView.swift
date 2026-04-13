@@ -1,3 +1,4 @@
+import LoopKit
 import SwiftUI
 
 struct DiaconnSetupView: View {
@@ -16,7 +17,10 @@ struct DiaconnSetupView: View {
                 .font(.largeTitle)
                 .fontWeight(.bold)
 
-            Text("Connect the Diaconn G8 insulin pump to Trio.\n\nMake sure the pump is nearby and Bluetooth is turned on.")
+            Text(LocalizedString(
+                "Connect the Diaconn G8 insulin pump to Trio.\n\nMake sure the pump is nearby and Bluetooth is turned on.",
+                comment: "Setup description"
+            ))
                 .font(.body)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
@@ -24,7 +28,7 @@ struct DiaconnSetupView: View {
             Spacer()
 
             Button(action: nextAction) {
-                Text("Next")
+                Text(LocalizedString("Next", comment: "Next button"))
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
@@ -35,6 +39,6 @@ struct DiaconnSetupView: View {
             .padding(.horizontal, 32)
             .padding(.bottom, 32)
         }
-        .navigationTitle("Pump Setup")
+        .navigationTitle(LocalizedString("Pump Setup", comment: "Pump setup navigation title"))
     }
 }
