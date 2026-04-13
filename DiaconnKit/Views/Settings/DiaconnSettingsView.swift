@@ -105,6 +105,7 @@ struct DiaconnSettingsView: View {
                     viewModel.refreshStatus()
                 }) {
                     HStack {
+                        Image(systemName: "arrow.triangle.2.circlepath")
                         Text(
                             LocalizedString(
                                 "Sync Pump Data", comment: "Button to sync pump data"
