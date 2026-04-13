@@ -58,7 +58,7 @@ struct DiaconnSoundSettingView: View {
 
     var body: some View {
         List {
-            Section(header: Text(LocalizedString("Alert Type", comment: "Alert type section header"))) {
+            Section(header: Text(LocalizedString("Pump Sound", comment: "Alert type section header"))) {
                 ForEach(DiaconnAlarmType.allCases, id: \.rawValue) { type in
                     Button {
                         selectedType = type.rawValue
@@ -101,6 +101,6 @@ struct DiaconnSoundSettingView: View {
                 }
             }
         }
-        .navigationTitle(LocalizedString("Alert Type", comment: "Alert type navigation title"))
+        .navigationTitle(LocalizedString("Pump Sound", comment: "Alert type navigation title"))
     }
 }

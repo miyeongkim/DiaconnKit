@@ -5,6 +5,7 @@ import SwiftUI
 
 struct DiaconnSettingsView: View {
     @ObservedObject var viewModel: DiaconnSettingsViewModel
+    @State private var showDebug = false
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -43,6 +44,8 @@ struct DiaconnSettingsView: View {
 
                 HStack(alignment: .top) {
                     deliveryStatus
+                    Spacer()
+                    batteryStatus
                     Spacer()
                     reservoirStatus
                 }
@@ -147,6 +150,27 @@ struct DiaconnSettingsView: View {
                             ?? LocalizedString("Unknown", comment: "Unknown time")
                     )
                     .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Text(
+                        LocalizedString(
+                            "Pump Time", comment: "Pump time label"
+                        )
+                    )
+                    .foregroundColor(.primary)
+                    Spacer()
+                    if let pumpTime = viewModel.pumpTime {
+                        Text(Self.dateTimeFormatter.string(from: pumpTime))
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text(
+                            LocalizedString(
+                                "Unknown", comment: "Unknown pump time"
+                            )
+                        )
+                        .foregroundColor(.secondary)
+                    }
                 }
 
                 // Component age tracking
@@ -306,23 +330,9 @@ struct DiaconnSettingsView: View {
                         Text(firmware)
                             .foregroundColor(.secondary)
                     }
-                }
-
-                HStack {
-                    Text(
-                        LocalizedString(
-                            "Battery", comment: "Battery level label"
-                        )
-                    )
-                    .foregroundColor(.primary)
-                    Spacer()
-                    Text(
-                        String(
-                            format: "%.0f%%",
-                            viewModel.batteryRemaining * 100
-                        )
-                    )
-                    .foregroundColor(.secondary)
+                    .onLongPressGesture {
+                        withAnimation { showDebug.toggle() }
+                    }
                 }
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -361,36 +371,16 @@ struct DiaconnSettingsView: View {
                 }
             }
 
-            // MARK: - Pump Time
+            // MARK: - Insulin Delivery
 
             Section(
                 header: Text(
                     LocalizedString(
-                        "Pump Time", comment: "Pump time section header"
+                        "Insulin Delivery",
+                        comment: "Insulin delivery section header"
                     )
                 )
             ) {
-                HStack {
-                    Text(
-                        LocalizedString(
-                            "Pump Time", comment: "Pump time label"
-                        )
-                    )
-                    .foregroundColor(.primary)
-                    Spacer()
-                    if let pumpTime = viewModel.pumpTime {
-                        Text(Self.dateTimeFormatter.string(from: pumpTime))
-                            .foregroundColor(.secondary)
-                    } else {
-                        Text(
-                            LocalizedString(
-                                "Unknown", comment: "Unknown pump time"
-                            )
-                        )
-                        .foregroundColor(.secondary)
-                    }
-                }
-
                 HStack {
                     Text(
                         LocalizedString(
@@ -433,67 +423,75 @@ struct DiaconnSettingsView: View {
                 }
             }
 
-            // MARK: - Debug
+            // MARK: - Debug (hidden, long-press Firmware to show)
 
-            Section(header: Text("Debug")) {
-                HStack {
-                    Text("Incarnation")
-                    Spacer()
-                    Text("\(viewModel.incarnation)")
+            if showDebug {
+                Section(
+                    header: Text("Debug"),
+                    footer: Text(
+                        "Pump Log shows the latest log position on the pump. Stored Log shows the last synced position. Changing stored wrap/log number will re-sync from that position."
+                    )
+                    .font(.footnote)
+                ) {
+                    HStack {
+                        Text("Incarnation")
+                        Spacer()
+                        Text("\(viewModel.incarnation)")
+                            .foregroundColor(.secondary)
+                    }
+
+                    HStack {
+                        Text("Pump Log")
+                        Spacer()
+                        Text(
+                            "wrap: \(viewModel.pumpWrapCount) / #\(viewModel.pumpLogNum)"
+                        )
                         .foregroundColor(.secondary)
-                }
+                    }
 
-                HStack {
-                    Text("Pump Log")
-                    Spacer()
-                    Text(
-                        "wrap: \(viewModel.pumpWrapCount) / #\(viewModel.pumpLogNum)"
-                    )
-                    .foregroundColor(.secondary)
-                }
+                    HStack {
+                        Text("Stored Log")
+                        Spacer()
+                        Text(
+                            "wrap: \(viewModel.storedWrapCount) / #\(viewModel.storedLogNum)"
+                        )
+                        .foregroundColor(.secondary)
+                    }
 
-                HStack {
-                    Text("Stored Log")
-                    Spacer()
-                    Text(
-                        "wrap: \(viewModel.storedWrapCount) / #\(viewModel.storedLogNum)"
-                    )
-                    .foregroundColor(.secondary)
-                }
+                    HStack {
+                        Text("Stored Log #")
+                        Spacer()
+                        TextField("logNum", text: $viewModel.editStoredLogNum)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                        Button("Apply") {
+                            viewModel.applyStoredLogNum()
+                        }
+                    }
 
-                HStack {
-                    Text("Change Stored Log Number")
-                    Spacer()
-                    TextField("logNum", text: $viewModel.editStoredLogNum)
+                    HStack {
+                        Text("Stored Wrap #")
+                        Spacer()
+                        TextField(
+                            "wrap", text: $viewModel.editStoredWrapCount
+                        )
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 80)
-                    Button("Apply") {
-                        viewModel.applyStoredLogNum()
+                        Button("Apply") {
+                            viewModel.applyStoredWrapCount()
+                        }
                     }
-                }
 
-                HStack {
-                    Text("Change Stored Wrap Number")
-                    Spacer()
-                    TextField(
-                        "wrap", text: $viewModel.editStoredWrapCount
-                    )
-                    .keyboardType(.numberPad)
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 80)
-                    Button("Apply") {
-                        viewModel.applyStoredWrapCount()
+                    Button(
+                        LocalizedString(
+                            "Test Communication",
+                            comment: "Button to test pump communication"
+                        )
+                    ) {
+                        viewModel.testCommunication()
                     }
-                }
-
-                Button(
-                    LocalizedString(
-                        "Test Communication",
-                        comment: "Button to test pump communication"
-                    )
-                ) {
-                    viewModel.testCommunication()
                 }
             }
 
@@ -522,8 +520,8 @@ struct DiaconnSettingsView: View {
         VStack(alignment: .leading, spacing: 5) {
             Text(
                 LocalizedString(
-                    "Insulin Delivery",
-                    comment: "Header for insulin delivery status"
+                    "Basal",
+                    comment: "Header for basal delivery status"
                 )
             )
             .foregroundColor(Color(UIColor.secondaryLabel))
@@ -592,14 +590,41 @@ struct DiaconnSettingsView: View {
         }
     }
 
+    // MARK: - Battery Status Component
+
+    private var batteryStatus: some View {
+        VStack(alignment: .center, spacing: 5) {
+            Text(
+                LocalizedString(
+                    "Battery",
+                    comment: "Header for battery status"
+                )
+            )
+            .foregroundColor(Color(UIColor.secondaryLabel))
+
+            HStack(alignment: .lastTextBaseline, spacing: 3) {
+                Text(String(format: "%.0f", viewModel.batteryRemaining * 100))
+                    .font(.system(size: 28))
+                    .fontWeight(.heavy)
+                    .fixedSize()
+                    .foregroundColor(
+                        viewModel.batteryRemaining <= 0.2 ? .red :
+                            viewModel.batteryRemaining <= 0.4 ? .orange : .primary
+                    )
+                Text("%")
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
     // MARK: - Reservoir Status Component
 
     private var reservoirStatus: some View {
         VStack(alignment: .trailing, spacing: 5) {
             Text(
                 LocalizedString(
-                    "Insulin Remaining",
-                    comment: "Header for insulin remaining"
+                    "Reservoir",
+                    comment: "Header for reservoir status"
                 )
             )
             .foregroundColor(Color(UIColor.secondaryLabel))
