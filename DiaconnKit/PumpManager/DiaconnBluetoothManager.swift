@@ -1,6 +1,6 @@
 import CoreBluetooth
 import Foundation
-public import LoopKit
+import LoopKit
 
 public enum DiaconnConnectionResult {
     case success

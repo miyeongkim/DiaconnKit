@@ -22,5 +22,7 @@
 	<string>Diaconn G8</string>
 	<key>com.loopkit.Loop.PumpManagerIdentifier</key>
 	<string>DiaconnG8</string>
+	<key>NSPrincipalClass</key>
+	<string>DiaconnKitPlugin.DiaconnKitPlugin</string>
 </dict>
 </plist>

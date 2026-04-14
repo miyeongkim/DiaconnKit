@@ -1,5 +1,4 @@
 import Combine
-import DiaconnKit
 import Foundation
 import LoopKit
 
@@ -32,7 +31,15 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
     @Published var incarnation: UInt16 = 0
     @Published var cannulaDate: Date?
     @Published var reservoirDate: Date?
+    @Published var batteryDate: Date?
     @Published var activeAlert: DiaconnPumpManagerAlert?
+    @Published var pumpTimeSyncedAt: Date?
+    @Published var showPumpTimeSyncWarning: Bool = false
+    @Published var isSyncingTime: Bool = false
+    @Published var isTempBasal: Bool = false
+    @Published var isStoppingTempBasal: Bool = false
+    @Published var showingDeleteConfirmation: Bool = false
+    @Published var showingTimeSyncConfirmation: Bool = false
 
     let allowedInsulinTypes: [InsulinType]
 
@@ -75,7 +82,17 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
         incarnation = state.syncedIncarnation
         cannulaDate = state.cannulaDate
         reservoirDate = state.reservoirDate
+        batteryDate = state.batteryDate
         activeAlert = pumpManager?.activeAlert
+        pumpTimeSyncedAt = state.pumpTimeSyncedAt
+        isTempBasal = state.isTempBasalInProgress
+
+        // Pump time sync warning: warn if pump clock and system clock differed by more than 2 minutes at sync time
+        if let pt = state.pumpTime, let syncedAt = state.pumpTimeSyncedAt {
+            showPumpTimeSyncWarning = abs(pt.timeIntervalSince(syncedAt)) > 120
+        } else {
+            showPumpTimeSyncWarning = false
+        }
 
         switch state.basalDeliveryOrdinal {
         case .active: basalStateDescription = "Active"
@@ -169,6 +186,11 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
             ?? LocalizedString("Unknown", comment: "Unknown date")
     }
 
+    var batteryDateString: String {
+        batteryDate.map { Self.lifecycleDateFormatter.string(from: $0) }
+            ?? LocalizedString("Unknown", comment: "Unknown date")
+    }
+
     func markCannulaChanged() {
         pumpManager?.state.cannulaDate = Date()
         pumpManager?.notifyStateDidChange()
@@ -179,6 +201,45 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
         pumpManager?.state.reservoirDate = Date()
         pumpManager?.notifyStateDidChange()
         updateFromState()
+    }
+
+    func markBatteryChanged() {
+        pumpManager?.state.batteryDate = Date()
+        pumpManager?.notifyStateDidChange()
+        updateFromState()
+    }
+
+    // MARK: - Stop Temp Basal
+
+    func stopTempBasal() {
+        isStoppingTempBasal = true
+        pumpManager?.enactTempBasal(unitsPerHour: 0, for: 0) { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.isStoppingTempBasal = false
+                self?.updateFromState()
+            }
+        }
+    }
+
+    // MARK: - Pump Time Sync
+
+    func syncPumpTime() {
+        isSyncingTime = true
+        pumpManager?.syncTime { [weak self] _ in
+            DispatchQueue.main.async {
+                self?.isSyncingTime = false
+                self?.updateFromState()
+            }
+        }
+    }
+
+    // MARK: - Log Sharing
+
+    private let log = DiaconnLogger(category: "DiaconnSettings")
+
+    func getLogFileURLs() -> [URL] {
+        log.info(pumpManager?.state.debugDescription ?? "No pump manager")
+        return log.getDebugLogs()
     }
 
     // MARK: - Alert Acknowledgement

@@ -1366,6 +1366,8 @@ extension DiaconnPumpManager: PumpManager {
                         self.state.reservoirDate = entry.date
                     case .changeNeedle:
                         self.state.cannulaDate = entry.date
+                    case .resetSys:
+                        self.state.batteryDate = entry.date
                     default:
                         break
                     }

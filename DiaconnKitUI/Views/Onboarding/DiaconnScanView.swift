@@ -1,4 +1,3 @@
-import DiaconnKit
 import SwiftUI
 
 struct DiaconnScanView: View {

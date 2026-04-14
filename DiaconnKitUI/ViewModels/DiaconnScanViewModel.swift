@@ -1,5 +1,4 @@
 import Combine
-import DiaconnKit
 import Foundation
 
 class DiaconnScanViewModel: ObservableObject, DiaconnStateObserver {

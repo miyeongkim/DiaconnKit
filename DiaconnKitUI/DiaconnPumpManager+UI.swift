@@ -1,4 +1,3 @@
-import DiaconnKit
 import LoopKit
 import LoopKitUI
 import SwiftUI

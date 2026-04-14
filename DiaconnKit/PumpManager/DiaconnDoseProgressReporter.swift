@@ -1,5 +1,5 @@
 import Foundation
-public import LoopKit
+import LoopKit
 
 internal class DiaconnDoseProgressReporter: DoseProgressReporter {
     private let dispatchQueue: DispatchQueue

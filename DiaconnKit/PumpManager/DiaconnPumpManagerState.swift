@@ -115,6 +115,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
 
     internal var cannulaDate: Date?
     internal var reservoirDate: Date?
+    internal var batteryDate: Date?
 
     // MARK: - Computed Properties
 
@@ -194,6 +195,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         }
         cannulaDate = rawValue["cannulaDate"] as? Date
         reservoirDate = rawValue["reservoirDate"] as? Date
+        batteryDate = rawValue["batteryDate"] as? Date
         pumpLastLogNum = UInt16((rawValue["pumpLastLogNum"] as? Int) ?? 0)
         pumpWrappingCount = UInt8((rawValue["pumpWrappingCount"] as? Int) ?? 0)
         storedLastLogNum = UInt16((rawValue["storedLastLogNum"] as? Int) ?? 0)
@@ -251,6 +253,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         value["pumpTimeZone"] = pumpTimeZone.identifier
         value["cannulaDate"] = cannulaDate
         value["reservoirDate"] = reservoirDate
+        value["batteryDate"] = batteryDate
         value["pumpLastLogNum"] = Int(pumpLastLogNum)
         value["pumpWrappingCount"] = Int(pumpWrappingCount)
         value["storedLastLogNum"] = Int(storedLastLogNum)

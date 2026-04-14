@@ -7,9 +7,9 @@ enum DiaconnAlarmType: UInt8, CaseIterable {
 
     var title: String {
         switch self {
-        case .sound: return LocalizedString("Sound", comment: "Alarm type: sound")
-        case .silent: return LocalizedString("Silent", comment: "Alarm type: silent")
-        case .vibration: return LocalizedString("Vibration", comment: "Alarm type: vibration")
+        case .sound: return LocalizedString("Sound", comment: "Sound type: sound")
+        case .silent: return LocalizedString("Silent", comment: "Sound type: silent")
+        case .vibration: return LocalizedString("Vibration", comment: "Sound type: vibration")
         }
     }
 
@@ -58,7 +58,7 @@ struct DiaconnSoundSettingView: View {
 
     var body: some View {
         List {
-            Section(header: Text(LocalizedString("Pump Sound", comment: "Alert type section header"))) {
+            Section(header: Text(LocalizedString("Pump Sound", comment: "Sound type section header"))) {
                 ForEach(DiaconnAlarmType.allCases, id: \.rawValue) { type in
                     Button {
                         selectedType = type.rawValue
@@ -101,6 +101,6 @@ struct DiaconnSoundSettingView: View {
                 }
             }
         }
-        .navigationTitle(LocalizedString("Pump Sound", comment: "Alert type navigation title"))
+        .navigationTitle(LocalizedString("Pump Sound", comment: "Sound type navigation title"))
     }
 }
