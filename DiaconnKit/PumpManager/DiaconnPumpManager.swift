@@ -331,13 +331,45 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
         return isClockOffset
     }
 
-    /// Sync pump clock to current system time (skip only during bolus)
+    /// Cancel temp basal if running, so that time setting can proceed.
+    /// Must be called on pumpQueue.
+    private func cancelTempBasalForTimeSync() {
+        guard state.isTempBasalInProgress else { return }
+        log.info("syncTime: cancelling temp basal before time sync")
+        do {
+            let cancelPacket = generateTempBasalCancelPacket()
+            guard let cancelResp = try bluetooth.writeAndWait(packet: cancelPacket),
+                  let parsed = parseTempBasalSettingResponse(cancelResp), parsed.isSuccess
+            else {
+                log.error("syncTime: temp basal cancel failed")
+                return
+            }
+            try confirmSettingCommand(
+                reqMsgType: DiaconnPacketType.TEMP_BASAL_SETTING,
+                otpNumber: parsed.otpNumber
+            )
+            state.isTempBasalInProgress = false
+            state.tempBasalUnits = nil
+            state.tempBasalDuration = nil
+            state.basalDeliveryOrdinal = .active
+            notifyStateDidChange()
+            log.info("syncTime: temp basal cancelled successfully")
+            Thread.sleep(forTimeInterval: 0.5)
+        } catch {
+            log.error("syncTime: temp basal cancel error: \(error)")
+        }
+    }
+
+    /// Sync pump clock to current system time (skip during bolus, cancel temp basal first)
     /// Must be called on pumpQueue
     private func syncTimeOnQueue() {
         guard state.bolusState == .noBolus else {
             log.info("syncTime skipped: bolus in progress")
             return
         }
+
+        // Pump rejects time setting while temp basal is running — cancel it first
+        cancelTempBasalForTimeSync()
 
         do {
             let packet = generateTimeSettingPacket(date: Date())
