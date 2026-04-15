@@ -545,12 +545,13 @@ extension DiaconnPumpManager: PumpManager {
     }
 
     public var supportedBolusVolumes: [Double] {
-        // 0.01U increments (since amount * 100)
-        stride(from: 0.05, through: max(state.maxBolus, 25.0), by: 0.05).map { $0 }
+        // Diaconn G8 supports 0.01U increments, max 30U per bolus
+        stride(from: 0.01, through: max(state.maxBolus, 30.0), by: 0.01).map { $0 }
     }
 
     public var supportedBasalRates: [Double] {
-        stride(from: 0.01, through: max(state.maxBasalPerHour, 16.0), by: 0.01).map { $0 }
+        // Diaconn G8: max basal 3U/h, temp basal up to 7.5U/h, 0.01U increments
+        stride(from: 0.01, through: max(state.maxBasalPerHour, 3.0), by: 0.01).map { $0 }
     }
 
     public var maximumBasalScheduleEntryCount: Int {
@@ -1535,7 +1536,11 @@ extension DiaconnPumpManager {
         syncLogHistory()
     }
 
-    func notifyBolusDidUpdate(deliveredUnits: Double) {
+    func notifyBolusDidUpdate(deliveredUnits: Double, setAmount: Double? = nil) {
+        if let setAmount = setAmount, setAmount > 0 {
+            state.totalUnits = setAmount
+            doseReporter?.totalUnits = setAmount
+        }
         state.deliveredUnits = deliveredUnits
         doseReporter?.notify(deliveredUnits: deliveredUnits, done: false)
     }

@@ -248,23 +248,6 @@ struct DiaconnSettingsView: View {
                     }
                 }
 
-                HStack {
-                    Text(
-                        LocalizedString(
-                            "Checked at", comment: "Text for pump time checked at"
-                        )
-                    )
-                    .foregroundColor(.primary)
-                    Spacer()
-                    Text(
-                        viewModel.pumpTimeSyncedAt.map {
-                            Self.dateTimeFormatter.string(from: $0)
-                        }
-                            ?? LocalizedString("Unknown", comment: "Unknown time")
-                    )
-                    .foregroundColor(.secondary)
-                }
-
                 Button(action: {
                     viewModel.showingTimeSyncConfirmation = true
                 }) {
@@ -796,7 +779,7 @@ struct DiaconnSettingsView: View {
                 }
             } else if case let .tempBasal(dose) = viewModel.basalDeliveryState {
                 HStack(alignment: .lastTextBaseline, spacing: 3) {
-                    Text(String(format: "T:%.1f", dose.unitsPerHour))
+                    Text(String(format: "T:%.2f", dose.unitsPerHour))
                         .font(.system(size: 28))
                         .fontWeight(.heavy)
                         .fixedSize()

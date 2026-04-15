@@ -475,7 +475,7 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
             let speed = DiaconnPacketDecoder.readByte(payload, offset: 4)
             let progressPercent = DiaconnPacketDecoder.readByte(payload, offset: 5)
             log.info("Bolus progress: \(currentAmount)U / \(setAmount)U speed=\(speed) \(progressPercent)%")
-            pumpManager?.notifyBolusDidUpdate(deliveredUnits: currentAmount)
+            pumpManager?.notifyBolusDidUpdate(deliveredUnits: currentAmount, setAmount: setAmount)
 
         case DiaconnPacketType.CONFIRM_REPORT:
             log.info("Confirm report")
@@ -538,9 +538,15 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
         log.info("Bolus result: requested=\(requestedAmount)U delivered=\(deliveredAmount)U canceled=\(result == 1)")
 
         if result == 0 {
+            // Bolus completed normally
             pumpManager?.notifyBolusDone(deliveredUnits: deliveredAmount)
         } else {
-            pumpManager?.notifyBolusError()
+            // Bolus cancelled — report actual delivered amount then clean up
+            if deliveredAmount > 0 {
+                pumpManager?.notifyBolusDone(deliveredUnits: deliveredAmount)
+            } else {
+                pumpManager?.notifyBolusError()
+            }
         }
     }
 }
