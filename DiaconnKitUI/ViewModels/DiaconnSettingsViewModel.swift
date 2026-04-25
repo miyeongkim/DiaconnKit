@@ -40,6 +40,13 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
     @Published var isStoppingTempBasal: Bool = false
     @Published var showingDeleteConfirmation: Bool = false
     @Published var showingTimeSyncConfirmation: Bool = false
+    @Published var cloudLogSyncEnabled: Bool = false
+    @Published var cloudSyncedIncarnation: UInt16 = 0
+    @Published var cloudLastLogNum: Int = 0
+    @Published var cloudLastWrapCount: Int = 0
+    @Published var isCloudSyncing: Bool = false
+    @Published var cloudSyncCurrentPage: Int = 0
+    @Published var cloudSyncTotalPages: Int = 0
 
     let allowedInsulinTypes: [InsulinType]
 
@@ -86,6 +93,13 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
         activeAlert = pumpManager?.activeAlert
         pumpTimeSyncedAt = state.pumpTimeSyncedAt
         isTempBasal = state.isTempBasalInProgress
+        cloudLogSyncEnabled = state.cloudLogSyncEnabled
+        cloudSyncedIncarnation = state.cloudSyncedIncarnation
+        cloudLastLogNum = state.cloudLastLogNum
+        cloudLastWrapCount = state.cloudLastWrapCount
+        isCloudSyncing = state.isCloudSyncing
+        cloudSyncCurrentPage = state.cloudSyncCurrentPage
+        cloudSyncTotalPages = state.cloudSyncTotalPages
 
         // Pump time sync warning: warn if pump clock and system clock differed by more than 2 minutes at sync time
         if let pt = state.pumpTime, let syncedAt = state.pumpTimeSyncedAt {
@@ -148,6 +162,12 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
                 }
             }
         }
+    }
+
+    func setCloudLogSyncEnabled(_ enabled: Bool) {
+        pumpManager?.state.cloudLogSyncEnabled = enabled
+        cloudLogSyncEnabled = enabled
+        pumpManager?.notifyStateDidChange()
     }
 
     func setBolusSpeed(_ speed: UInt8) {

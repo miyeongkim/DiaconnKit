@@ -209,4 +209,8 @@ extension Data {
         append(UInt8((value >> 16) & 0xFF))
         append(UInt8((value >> 24) & 0xFF))
     }
+
+    var hexString: String {
+        map { String(format: "%02x", $0) }.joined()
+    }
 }

@@ -111,6 +111,19 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
     internal var pumpTimeSyncedAt: Date?
     internal var pumpTimeZone = TimeZone.current
 
+    // MARK: - Cloud Sync
+
+    internal var cloudLogSyncEnabled: Bool = false
+    /// Incarnation number that was used in the last successful cloud sync query
+    internal var cloudSyncedIncarnation: UInt16 = 0
+    /// Last log position confirmed stored in cloud
+    internal var cloudLastLogNum: Int = 0
+    internal var cloudLastWrapCount: Int = 0
+    /// Cloud sync in-progress flag (transient, not persisted)
+    internal var isCloudSyncing: Bool = false
+    internal var cloudSyncCurrentPage: Int = 0
+    internal var cloudSyncTotalPages: Int = 0
+
     // MARK: - User Settings
 
     internal var cannulaDate: Date?
@@ -203,6 +216,10 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         isFirstLogSync = rawValue["isFirstLogSync"] as? Bool ?? true
         syncedSerialNumber = rawValue["syncedSerialNumber"] as? String
         syncedIncarnation = UInt16((rawValue["syncedIncarnation"] as? Int) ?? 0)
+        cloudLogSyncEnabled = rawValue["cloudLogSyncEnabled"] as? Bool ?? false
+        cloudSyncedIncarnation = UInt16((rawValue["cloudSyncedIncarnation"] as? Int) ?? 0)
+        cloudLastLogNum = rawValue["cloudLastLogNum"] as? Int ?? 0
+        cloudLastWrapCount = rawValue["cloudLastWrapCount"] as? Int ?? 0
 
         if let rawInsulinType = rawValue["insulinType"] as? InsulinType.RawValue {
             insulinType = InsulinType(rawValue: rawInsulinType)
@@ -261,6 +278,10 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         value["isFirstLogSync"] = isFirstLogSync
         value["syncedSerialNumber"] = syncedSerialNumber
         value["syncedIncarnation"] = Int(syncedIncarnation)
+        value["cloudLogSyncEnabled"] = cloudLogSyncEnabled
+        value["cloudSyncedIncarnation"] = Int(cloudSyncedIncarnation)
+        value["cloudLastLogNum"] = cloudLastLogNum
+        value["cloudLastWrapCount"] = cloudLastWrapCount
 
         return value
     }

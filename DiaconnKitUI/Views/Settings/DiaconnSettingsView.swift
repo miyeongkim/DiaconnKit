@@ -354,7 +354,14 @@ struct DiaconnSettingsView: View {
                     LocalizedString(
                         "Configuration", comment: "Configuration section header"
                     )
+                ),
+                footer: Text(
+                    LocalizedString(
+                        "When Diaconn Cloud Log Sync is enabled, pump logs are automatically uploaded to the Diaconn Cloud after each sync. These logs help Diaconn support team provide faster and more accurate assistance when needed.",
+                        comment: "Footer explaining Diaconn Cloud Log Sync feature"
+                    )
                 )
+                .font(.footnote)
             ) {
                 NavigationLink(
                     destination: InsulinTypeSetting(
@@ -435,6 +442,36 @@ struct DiaconnSettingsView: View {
                                 .title ?? ""
                         )
                         .foregroundColor(.secondary)
+                    }
+                }
+
+                Toggle(
+                    LocalizedString(
+                        "Diaconn Cloud Log Sync",
+                        comment: "Toggle to enable uploading pump logs to Diaconn cloud"
+                    ),
+                    isOn: Binding(
+                        get: { viewModel.cloudLogSyncEnabled },
+                        set: { viewModel.setCloudLogSyncEnabled($0) }
+                    )
+                )
+
+                if viewModel.isCloudSyncing && viewModel.cloudSyncTotalPages > 100 {
+                    HStack {
+                        ProgressView()
+                            .padding(.trailing, 4)
+                        Text(
+                            String(
+                                format: LocalizedString(
+                                    "Uploading logs: %d / %d",
+                                    comment: "Cloud sync progress"
+                                ),
+                                viewModel.cloudSyncCurrentPage,
+                                viewModel.cloudSyncTotalPages
+                            )
+                        )
+                        .foregroundColor(.secondary)
+                        .font(.footnote)
                     }
                 }
             }
@@ -582,7 +619,7 @@ struct DiaconnSettingsView: View {
 
             if showDebug {
                 Section(
-                    header: Text("Debug"),
+                    header: Text("Debug – Local"),
                     footer: Text(
                         "Pump Log shows the latest log position on the pump. Stored Log shows the last synced position. Changing stored wrap/log number will re-sync from that position."
                     )
@@ -646,6 +683,32 @@ struct DiaconnSettingsView: View {
                         )
                     ) {
                         viewModel.testCommunication()
+                    }
+                }
+
+                if showDebug && viewModel.cloudLogSyncEnabled {
+                    Section(header: Text("Debug – Cloud")) {
+                        HStack {
+                            Text("Incarnation")
+                            Spacer()
+                            Text("\(viewModel.cloudSyncedIncarnation)")
+                                .foregroundColor(.secondary)
+                        }
+                        HStack {
+                            Text("Cloud Log")
+                            Spacer()
+                            Text("wrap: \(viewModel.cloudLastWrapCount) / #\(viewModel.cloudLastLogNum)")
+                                .foregroundColor(.secondary)
+                        }
+                        if viewModel.isCloudSyncing {
+                            HStack {
+                                Text("Syncing")
+                                Spacer()
+                                Text("\(viewModel.cloudSyncCurrentPage) / \(viewModel.cloudSyncTotalPages) pages")
+                                    .foregroundColor(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
                     }
                 }
             }

@@ -37,6 +37,8 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
     private let log = DiaconnLogger(category: "DiaconnPumpManager")
     private let pumpQueue = DispatchQueue(label: "com.diaconkit.pumpmanager", qos: .userInitiated)
     private let backgroundTask = DiaconnBackgroundTask()
+    private let cloudUploader = DiaconnCloudUploader()
+    private var cloudSyncTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -577,8 +579,8 @@ extension DiaconnPumpManager: PumpManager {
     }
 
     public var supportedBolusVolumes: [Double] {
-        // Diaconn G8 supports 0.01U increments, max 30U per bolus
-        stride(from: 0.01, through: max(state.maxBolus, 30.0), by: 0.01).map { $0 }
+        // Diaconn G8 minimum bolus is 0.02U; pump rejects 0.01U with parameterError
+        stride(from: 0.02, through: max(state.maxBolus, 30.0), by: 0.01).map { $0 }
     }
 
     public var supportedBasalRates: [Double] {
@@ -691,6 +693,15 @@ extension DiaconnPumpManager: PumpManager {
             completion(.communication(DiaconnPumpManagerError.bolusInProgress))
             return
         }
+
+        guard units >= 0.02 else {
+            log.info("enactBolus: skipping \(units)U — below minimum 0.02U")
+            completion(nil)
+            return
+        }
+
+        cloudSyncTask?.cancel()
+        cloudSyncTask = nil
 
         state.bolusState = .initiating
         notifyStateDidChange()
@@ -809,102 +820,123 @@ extension DiaconnPumpManager: PumpManager {
             return
         }
 
+        cloudSyncTask?.cancel()
+        cloudSyncTask = nil
+
         pumpQueue.async { [weak self] in
             guard let self = self else { return }
 
-            do {
-                let packet: Data
-                if unitsPerHour == 0, durationMinutes == 0 {
-                    // Cancel temp basal
-                    packet = generateTempBasalCancelPacket()
-                } else {
-                    // If same as current scheduled basal rate, no temp basal needed
-                    let scheduledRate = self.currentBaseBasalRate
-                    if abs(unitsPerHour - scheduledRate) < 0.005 {
-                        self.log
-                            .info(
-                                "enactTempBasal: \(unitsPerHour)U/h == scheduled \(scheduledRate)U/h — skipping TBR"
-                            )
-                        // If temp basal is already running, cancel it
-                        if self.state.isTempBasalInProgress {
-                            let cancelPacket = generateTempBasalCancelPacket()
-                            if let cancelResp = try? self.bluetooth.writeAndWait(packet: cancelPacket),
-                               let parsed = parseTempBasalSettingResponse(cancelResp), parsed.isSuccess
-                            {
-                                try? self.confirmSettingCommand(
-                                    reqMsgType: DiaconnPacketType.TEMP_BASAL_SETTING,
-                                    otpNumber: parsed.otpNumber
+            var lastError: Error?
+            for attempt in 1 ... 3 {
+                do {
+                    let packet: Data
+                    if unitsPerHour == 0, durationMinutes == 0 {
+                        // Cancel temp basal
+                        packet = generateTempBasalCancelPacket()
+                    } else {
+                        // If same as current scheduled basal rate, no temp basal needed
+                        let scheduledRate = self.currentBaseBasalRate
+                        if abs(unitsPerHour - scheduledRate) < 0.005 {
+                            self.log
+                                .info(
+                                    "enactTempBasal: \(unitsPerHour)U/h == scheduled \(scheduledRate)U/h — skipping TBR"
                                 )
+                            // If temp basal is already running, cancel it
+                            if self.state.isTempBasalInProgress {
+                                let cancelPacket = generateTempBasalCancelPacket()
+                                if let cancelResp = try? self.bluetooth.writeAndWait(packet: cancelPacket),
+                                   let parsed = parseTempBasalSettingResponse(cancelResp), parsed.isSuccess
+                                {
+                                    try? self.confirmSettingCommand(
+                                        reqMsgType: DiaconnPacketType.TEMP_BASAL_SETTING,
+                                        otpNumber: parsed.otpNumber
+                                    )
+                                }
+                                self.state.isTempBasalInProgress = false
+                                self.state.tempBasalUnits = nil
+                                self.state.tempBasalDuration = nil
+                                self.state.basalDeliveryOrdinal = .active
+                                self.notifyStateDidChange()
                             }
-                            self.state.isTempBasalInProgress = false
-                            self.state.tempBasalUnits = nil
-                            self.state.tempBasalDuration = nil
-                            self.state.basalDeliveryOrdinal = .active
-                            self.notifyStateDidChange()
+                            completion(nil)
+                            return
                         }
-                        completion(nil)
-                        return
+
+                        // If temp basal is already running, use status=3 stealth mode for seamless change
+                        let tbrStatus: UInt8 = self.state.isTempBasalInProgress ? 3 : 1
+                        packet = generateTempBasalAbsolutePacket(
+                            unitsPerHour: unitsPerHour,
+                            durationMinutes: durationMinutes,
+                            status: tbrStatus
+                        )
                     }
 
-                    // If temp basal is already running, use status=3 stealth mode for seamless change
-                    let tbrStatus: UInt8 = self.state.isTempBasalInProgress ? 3 : 1
-                    packet = generateTempBasalAbsolutePacket(
-                        unitsPerHour: unitsPerHour,
-                        durationMinutes: durationMinutes,
-                        status: tbrStatus
+                    guard let responseData = try self.bluetooth.writeAndWait(packet: packet) else {
+                        throw DiaconnPumpManagerError.communicationFailure
+                    }
+
+                    guard let response = parseTempBasalSettingResponse(responseData) else {
+                        throw DiaconnPumpManagerError.communicationFailure
+                    }
+
+                    guard response.isSuccess else {
+                        let settingResult = DiaconnPacketType.SettingResult(rawValue: Int(response.result))
+                        throw DiaconnPumpManagerError.settingFailed(settingResult ?? .protocolError)
+                    }
+
+                    // OTP confirm
+                    try self.confirmSettingCommand(
+                        reqMsgType: DiaconnPacketType.TEMP_BASAL_SETTING,
+                        otpNumber: response.otpNumber
                     )
+
+                    // Update status
+                    if unitsPerHour == 0, durationMinutes == 0 {
+                        self.state.isTempBasalInProgress = false
+                        self.state.tempBasalUnits = nil
+                        self.state.tempBasalDuration = nil
+                        self.state.basalDeliveryOrdinal = .active
+                    } else {
+                        self.state.isTempBasalInProgress = true
+                        self.state.tempBasalUnits = unitsPerHour
+                        self.state.tempBasalDuration = duration
+                        self.state.basalDeliveryDate = Date()
+                        self.state.basalDeliveryOrdinal = .tempBasal
+                    }
+                    self.notifyStateDidChange()
+
+                    // TBR events are recorded via syncLogHistory (pump log based)
+                    self.syncLogHistory()
+
+                    completion(nil)
+                    return
+
+                } catch let diaconnError as DiaconnPumpManagerError {
+                    if case let .settingFailed(result) = diaconnError,
+                       result == .otherOperationInProgress,
+                       attempt < 3
+                    {
+                        self.log.info("enactTempBasal: pump busy, retrying (\(attempt)/3)...")
+                        Thread.sleep(forTimeInterval: 2.0)
+                        lastError = diaconnError
+                        continue
+                    }
+                    lastError = diaconnError
+                    break
+                } catch {
+                    lastError = error
+                    break
                 }
-
-                guard let responseData = try self.bluetooth.writeAndWait(packet: packet) else {
-                    throw DiaconnPumpManagerError.communicationFailure
-                }
-
-                guard let response = parseTempBasalSettingResponse(responseData) else {
-                    throw DiaconnPumpManagerError.communicationFailure
-                }
-
-                guard response.isSuccess else {
-                    let settingResult = DiaconnPacketType.SettingResult(rawValue: Int(response.result))
-                    throw DiaconnPumpManagerError.settingFailed(settingResult ?? .protocolError)
-                }
-
-                // OTP confirm
-                try self.confirmSettingCommand(
-                    reqMsgType: DiaconnPacketType.TEMP_BASAL_SETTING,
-                    otpNumber: response.otpNumber
-                )
-
-                // Update status
-                if unitsPerHour == 0, durationMinutes == 0 {
-                    self.state.isTempBasalInProgress = false
-                    self.state.tempBasalUnits = nil
-                    self.state.tempBasalDuration = nil
-                    self.state.basalDeliveryOrdinal = .active
-                } else {
-                    self.state.isTempBasalInProgress = true
-                    self.state.tempBasalUnits = unitsPerHour
-                    self.state.tempBasalDuration = duration
-                    self.state.basalDeliveryDate = Date()
-                    self.state.basalDeliveryOrdinal = .tempBasal
-                }
-                self.notifyStateDidChange()
-
-                // TBR events are recorded via syncLogHistory (pump log based)
-                self.syncLogHistory()
-
-                completion(nil)
-
-            } catch {
-                self.log.error("enactTempBasal failed: \(error)")
-
-                let pumpError: DiaconnPumpManagerError
-                if let diaconnError = error as? DiaconnPumpManagerError {
-                    pumpError = diaconnError
-                } else {
-                    pumpError = .unknown(error.localizedDescription)
-                }
-                completion(.communication(pumpError))
             }
+
+            self.log.error("enactTempBasal failed: \(String(describing: lastError))")
+            let pumpError: DiaconnPumpManagerError
+            if let diaconnError = lastError as? DiaconnPumpManagerError {
+                pumpError = diaconnError
+            } else {
+                pumpError = .unknown(lastError?.localizedDescription ?? "Unknown")
+            }
+            completion(.communication(pumpError))
         }
     }
 
@@ -1390,7 +1422,6 @@ extension DiaconnPumpManager: PumpManager {
                 }
 
                 let entries = try self.fetchNewLogEntries()
-                guard !entries.isEmpty else { return }
 
                 // Detect device lifecycle events from log entries
                 for entry in entries {
@@ -1406,37 +1437,205 @@ extension DiaconnPumpManager: PumpManager {
                     }
                 }
 
-                let events = self.logEntriesToPumpEvents(entries)
-                NSLog("[DiaconnKit] syncLogHistory: \(entries.count) entries → \(events.count) events")
-                for event in events {
-                    let doseDesc = event.dose.map { d -> String in
-                        let amount = d.deliveredUnits.map { "\($0)U delivered" } ?? "\(d.type)"
-                        return "doseType=\(d.type) \(amount) start=\(d.startDate) end=\(d.endDate)"
-                    } ?? "no dose"
-                    NSLog("[DiaconnKit]   event: title=\(event.title) eventType=\(String(describing: event.type)) \(doseDesc)")
-                }
-                guard !events.isEmpty else { return }
-
-                let now = Date()
-                self.pumpDelegate.notify { delegate in
-                    guard let delegate = delegate else { return }
-                    delegate.pumpManager(
-                        self,
-                        hasNewPumpEvents: events,
-                        lastReconciliation: now,
-                        replacePendingEvents: false
-                    ) { error in
-                        if let error = error {
-                            NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents error: \(error)")
-                        } else {
-                            NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents stored OK")
+                if !entries.isEmpty {
+                    let events = self.logEntriesToPumpEvents(entries)
+                    NSLog("[DiaconnKit] syncLogHistory: \(entries.count) entries → \(events.count) events")
+                    for event in events {
+                        let doseDesc = event.dose.map { d -> String in
+                            let amount = d.deliveredUnits.map { "\($0)U delivered" } ?? "\(d.type)"
+                            return "doseType=\(d.type) \(amount) start=\(d.startDate) end=\(d.endDate)"
+                        } ?? "no dose"
+                        NSLog(
+                            "[DiaconnKit]   event: title=\(event.title) eventType=\(String(describing: event.type)) \(doseDesc)"
+                        )
+                    }
+                    if !events.isEmpty {
+                        let now = Date()
+                        self.pumpDelegate.notify { delegate in
+                            guard let delegate = delegate else { return }
+                            delegate.pumpManager(
+                                self,
+                                hasNewPumpEvents: events,
+                                lastReconciliation: now,
+                                replacePendingEvents: false
+                            ) { error in
+                                if let error = error {
+                                    NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents error: \(error)")
+                                } else {
+                                    NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents stored OK")
+                                }
+                            }
                         }
                     }
                 }
             } catch {
                 self.log.error("syncLogHistory failed: \(error)")
             }
+
+            if self.state.cloudLogSyncEnabled {
+                self.cloudSyncTask = Task { [weak self] in await self?.syncCloudLogHistory() }
+            }
         }
+    }
+
+    // MARK: - Cloud Log Sync
+
+    private func syncCloudLogHistory() async {
+        guard state.cloudLogSyncEnabled,
+              !state.isCloudSyncing,
+              let pumpUid = state.serialNumber,
+              let pumpVersion = state.firmwareVersion
+        else { return }
+
+        let incarnationNum = Int(state.syncedIncarnation)
+        let pumpLastNum = Int(state.pumpLastLogNum)
+        let pumpWrappingCount = Int(state.pumpWrappingCount)
+
+        do {
+            let platformLastNo = try await cloudUploader.getPumpLastNo(
+                pumpUid: pumpUid,
+                pumpVersion: pumpVersion,
+                incarnationNum: incarnationNum
+            )
+            NSLog(
+                "[DiaconnKit] syncCloudLogHistory: platformLastNo=\(platformLastNo) pumpLast=\(pumpLastNum) pumpWrap=\(pumpWrappingCount)"
+            )
+
+            let platformWrappingCount = platformLastNo < 0 ? 0 : Int(platformLastNo / 10000)
+            let platformLogNo = platformLastNo == -1 ? 9999 : Int(platformLastNo % 10000)
+
+            state.cloudSyncedIncarnation = UInt16(incarnationNum)
+            state.cloudLastWrapCount = platformWrappingCount
+            state.cloudLastLogNum = platformLastNo == -1 ? 0 : Int(platformLastNo % 10000)
+            notifyStateDidChange()
+
+            let (start, end, loopSize) = cloudLogLoopCount(
+                platformLastNo: Int(platformLastNo),
+                platformLogNo: platformLogNo,
+                platformWrappingCount: platformWrappingCount,
+                pumpLastNum: pumpLastNum,
+                pumpWrappingCount: pumpWrappingCount
+            )
+
+            guard loopSize > 0 else {
+                NSLog("[DiaconnKit] syncCloudLogHistory: no new logs to upload")
+                return
+            }
+
+            NSLog("[DiaconnKit] syncCloudLogHistory: uploading \(loopSize) pages start=\(start) end=\(end)")
+
+            state.isCloudSyncing = true
+            state.cloudSyncCurrentPage = 0
+            state.cloudSyncTotalPages = loopSize
+            notifyStateDidChange()
+
+            let appUid = await MainActor.run { UIDevice.current.identifierForVendor?.uuidString ?? "" }
+            let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
+            let pageSize = 11
+
+            for i in 0 ..< loopSize {
+                guard !Task.isCancelled else {
+                    NSLog("[DiaconnKit] syncCloudLogHistory: cancelled at page \(i + 1)/\(loopSize)")
+                    break
+                }
+
+                let pageStart = start + i * pageSize
+                let pageEnd = min(pageStart + pageSize, end)
+
+                let entries = try await fetchLogsForCloudRange(start: UInt16(pageStart), end: UInt16(pageEnd))
+                guard !entries.isEmpty else { continue }
+
+                let pumpLogs = entries.map { entry in
+                    DiaconnPumpLog(
+                        pumplog_no: Int64(entry.logNum),
+                        pumplog_wrapping_count: Int(entry.wrapCount),
+                        pumplog_data: entry.logDataBytes.hexString,
+                        act_type: "1"
+                    )
+                }
+
+                let dto = DiaconnPumpLogDto(
+                    app_uid: appUid,
+                    app_version: appVersion,
+                    pump_uid: pumpUid,
+                    pump_version: pumpVersion,
+                    incarnation_num: incarnationNum,
+                    pumplog_info: pumpLogs
+                )
+
+                let success = try await cloudUploader.uploadPumpLogs(dto: dto)
+                NSLog(
+                    "[DiaconnKit] syncCloudLogHistory: page \(i + 1)/\(loopSize) (\(pageStart)~\(pageEnd), \(entries.count) entries) ok=\(success)"
+                )
+                if !success { break }
+
+                if let lastEntry = entries.last {
+                    state.cloudLastLogNum = Int(lastEntry.logNum)
+                    state.cloudLastWrapCount = Int(lastEntry.wrapCount)
+                }
+                state.cloudSyncCurrentPage = i + 1
+                // Notify UI every 10 pages to avoid flooding main thread
+                if (i + 1) % 10 == 0 {
+                    notifyStateDidChange()
+                }
+            }
+
+            state.isCloudSyncing = false
+            notifyStateDidChange()
+        } catch {
+            NSLog("[DiaconnKit] syncCloudLogHistory error: \(error)")
+            state.isCloudSyncing = false
+            notifyStateDidChange()
+        }
+    }
+
+    private func fetchLogsForCloudRange(start: UInt16, end: UInt16) async throws -> [DiaconnLogEntry] {
+        try await withCheckedThrowingContinuation { continuation in
+            pumpQueue.async { [weak self] in
+                guard let self = self else {
+                    continuation.resume(throwing: DiaconnPumpManagerError.communicationFailure)
+                    return
+                }
+                do {
+                    let packet = generateBigLogInquirePacket(start: start, end: end)
+                    guard let responseData = try self.bluetooth.writeAndWait(packet: packet, timeout: 15.0) else {
+                        throw DiaconnPumpManagerError.communicationFailure
+                    }
+                    let entries = parseBigLogInquireResponse(responseData) ?? []
+                    continuation.resume(returning: entries)
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private func cloudLogLoopCount(
+        platformLastNo: Int,
+        platformLogNo: Int,
+        platformWrappingCount: Int,
+        pumpLastNum: Int,
+        pumpWrappingCount: Int
+    ) -> (start: Int, end: Int, size: Int) {
+        let start: Int
+        let end: Int
+
+        if pumpWrappingCount * 10000 + pumpLastNum - platformLastNo > 10000 {
+            start = pumpLastNum
+            end = 10000
+        } else if pumpWrappingCount > platformWrappingCount, platformLogNo < 9999 {
+            start = platformLogNo + 1
+            end = 10000
+        } else if pumpWrappingCount > platformWrappingCount, platformLogNo >= 9999 {
+            start = 0
+            end = pumpLastNum
+        } else {
+            start = platformLogNo + 1
+            end = pumpLastNum
+        }
+
+        let size = max(0, Int(ceil(Double(end - start) / 11.0)))
+        return (start, end, size)
     }
 
     /// Convert DiaconnLogEntry array to LoopKit NewPumpEvent array

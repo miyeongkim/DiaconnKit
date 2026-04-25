@@ -509,6 +509,8 @@ public struct DiaconnLogEntry {
     public var tbTime: Int
     /// Square/dual bolus injection time unit (1 unit = 10 min), meal/normal is direct minutes
     public var injectTimeUnit: Int
+    /// Raw 12-byte logData from pump (bytes after wrapCount+logNum) — used for cloud upload (pumplog_data)
+    public var logDataBytes: Data
 }
 
 /// Generate BIG_LOG_INQUIRE request packet
@@ -641,7 +643,7 @@ public func parseBigLogInquireResponse(_ data: Data) -> [DiaconnLogEntry]? {
             break
 
         default:
-            continue
+            break
         }
 
         let entry = DiaconnLogEntry(
@@ -653,7 +655,8 @@ public func parseBigLogInquireResponse(_ data: Data) -> [DiaconnLogEntry]? {
             setAmount: setAmount,
             tbRateRatio: tbRateRatio,
             tbTime: tbTime,
-            injectTimeUnit: injectTimeUnit
+            injectTimeUnit: injectTimeUnit,
+            logDataBytes: Data(payload[base + 3 ..< base + entrySize])
         )
         NSLog(
             "[DiaconnKit] LOG #\(logNum)(wrap=\(wrapCount)) kind=\(kind)(0x\(String(format: "%02X", rawKind))) date=\(date) injectAmount=\(injectAmount) setAmount=\(setAmount) tbRateRatio=\(tbRateRatio) tbTime=\(tbTime) injectTimeUnit=\(injectTimeUnit)"
