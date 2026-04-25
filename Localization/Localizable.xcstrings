@@ -4,6 +4,22 @@
     "%" : {
 
     },
+    "%lld / %lld pages" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld / %2$lld pages"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld / %2$lld 페이지"
+          }
+        }
+      }
+    },
     "%u" : {
 
     },
@@ -120,6 +136,16 @@
         }
       }
     },
+    "Cloud Log" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "클라우드 로그"
+          }
+        }
+      }
+    },
     "Component Age" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -201,8 +227,35 @@
         }
       }
     },
-    "Debug" : {
-
+    "Debug – Cloud" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "디버그 – 클라우드"
+          }
+        }
+      }
+    },
+    "Debug – Local" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "디버그 – 로컬"
+          }
+        }
+      }
+    },
+    "Diaconn Cloud Log Sync" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "디아콘 클라우드 로그 동기화"
+          }
+        }
+      }
     },
     "Delete Pump" : {
       "extractionState" : "stale",
@@ -286,7 +339,14 @@
       }
     },
     "Incarnation" : {
-
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "인카네이션"
+          }
+        }
+      }
     },
     "Insulin\nSuspended" : {
       "extractionState" : "stale",
@@ -805,6 +865,16 @@
         }
       }
     },
+    "Syncing" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "동기화 중"
+          }
+        }
+      }
+    },
     "Test Communication" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -893,6 +963,16 @@
         }
       }
     },
+    "Uploading logs: %d / %d" : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그 업로드 중: %1$d / %2$d"
+          }
+        }
+      }
+    },
     "Unknown" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -915,8 +995,34 @@
         }
       }
     },
+    "When Diaconn Cloud Log Sync is enabled, pump logs are automatically uploaded to the Diaconn Cloud after each sync. These logs help Diaconn support team provide faster and more accurate assistance when needed." : {
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "디아콘 클라우드 로그 동기화를 활성화하면, 매 동기화 후 펌프 로그가 자동으로 디아콘 클라우드에 업로드됩니다. 이 로그는 문제 발생 시 디아콘 지원팀이 더 빠르고 정확하게 도움을 제공하는 데 활용됩니다."
+          }
+        }
+      }
+    },
     "wrap" : {
 
+    },
+    "wrap: %lld / #%lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "wrap: %1$lld / #%2$lld"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "랩: %1$lld / #%2$lld"
+          }
+        }
+      }
     },
     "wrap: %u / #%u" : {
       "localizations" : {
