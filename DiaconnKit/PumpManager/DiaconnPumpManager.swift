@@ -1481,11 +1481,22 @@ extension DiaconnPumpManager: PumpManager {
     // MARK: - Cloud Log Sync
 
     private func syncCloudLogHistory() async {
-        guard state.cloudLogSyncEnabled,
-              !state.isCloudSyncing,
-              let pumpUid = state.serialNumber,
-              let pumpVersion = state.firmwareVersion
-        else { return }
+        guard state.cloudLogSyncEnabled else {
+            NSLog("[DiaconnKit] syncCloudLogHistory: skipped – cloudLogSyncEnabled=false")
+            return
+        }
+        guard !state.isCloudSyncing else {
+            NSLog("[DiaconnKit] syncCloudLogHistory: skipped – already syncing")
+            return
+        }
+        guard let pumpUid = state.serialNumber else {
+            NSLog("[DiaconnKit] syncCloudLogHistory: skipped – serialNumber is nil")
+            return
+        }
+        guard let pumpVersion = state.firmwareVersion else {
+            NSLog("[DiaconnKit] syncCloudLogHistory: skipped – firmwareVersion is nil")
+            return
+        }
 
         let incarnationNum = Int(state.syncedIncarnation)
         let pumpLastNum = Int(state.pumpLastLogNum)
@@ -1617,6 +1628,12 @@ extension DiaconnPumpManager: PumpManager {
         pumpLastNum: Int,
         pumpWrappingCount: Int
     ) -> (start: Int, end: Int, size: Int) {
+        // First sync: no logs on server yet — upload everything from 0 to pumpLastNum
+        if platformLastNo < 0 {
+            let size = max(0, Int(ceil(Double(pumpLastNum) / 11.0)))
+            return (0, pumpLastNum, size)
+        }
+
         let start: Int
         let end: Int
 
