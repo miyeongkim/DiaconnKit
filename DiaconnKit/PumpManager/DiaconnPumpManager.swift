@@ -1894,7 +1894,12 @@ public extension DiaconnPumpManager {
             delegate?.retractAlert(identifier: identifier)
         }
         activeAlert = nil
-        notifyStateDidChange()
+        // activeAlert is not part of DiaconnPumpManagerState, so notifyStateDidChange() would
+        // early-exit (state unchanged). Notify state observers directly instead.
+        let currentState = state
+        stateObservers.forEach { observer in
+            observer.stateDidUpdate(currentState, currentState)
+        }
     }
 }
 
