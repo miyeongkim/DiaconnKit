@@ -247,16 +247,6 @@
         }
       }
     },
-    "Diaconn Cloud Log Sync" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "디아콘 클라우드 로그 동기화"
-          }
-        }
-      }
-    },
     "Delete Pump" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -264,6 +254,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "펌프 삭제"
+          }
+        }
+      }
+    },
+    "Diaconn Cloud Log Sync" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "디아콘 클라우드 로그 동기화"
           }
         }
       }
@@ -963,16 +964,6 @@
         }
       }
     },
-    "Uploading logs: %d / %d" : {
-      "localizations" : {
-        "ko" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "로그 업로드 중: %1$d / %2$d"
-          }
-        }
-      }
-    },
     "Unknown" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -980,6 +971,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "알 수 없음"
+          }
+        }
+      }
+    },
+    "Uploading logs: %d / %d" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "로그 업로드 중: %1$d / %2$d"
           }
         }
       }
@@ -996,6 +998,7 @@
       }
     },
     "When Diaconn Cloud Log Sync is enabled, pump logs are automatically uploaded to the Diaconn Cloud after each sync. These logs help Diaconn support team provide faster and more accurate assistance when needed." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ko" : {
           "stringUnit" : {
