@@ -913,7 +913,7 @@ struct DiaconnSettingsView: View {
             .foregroundColor(Color(UIColor.secondaryLabel))
 
             HStack(alignment: .lastTextBaseline, spacing: 3) {
-                Text(String(format: "%.0f", viewModel.reservoirLevel))
+                Text("\(Int(viewModel.reservoirLevel))")
                     .font(.system(size: 28))
                     .fontWeight(.heavy)
                     .fixedSize()
