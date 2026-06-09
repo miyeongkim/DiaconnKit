@@ -1072,6 +1072,28 @@ extension DiaconnPumpManager: PumpManager {
                     otpNumber: response.otpNumber
                 )
 
+                // Pump takes 10s+ to commit the basal profile to flash after OTP confirm.
+                // 0xCB / 0xE8 reports fire before commit is fully done, so they aren't reliable
+                // gates. Sleep 15s before attempting pattern activation.
+                Thread.sleep(forTimeInterval: 15.0)
+
+                // Activate the pattern (required after factory reset so currentBasePattern is no longer 0)
+                let activatePacket = generateBasalInjectionSettingPacket(pattern: self.state.basalPattern)
+                guard let activateData = try self.bluetooth.writeAndWait(packet: activatePacket),
+                      let activateResp = parseBasalInjectionSettingResponse(activateData)
+                else {
+                    throw DiaconnPumpManagerError.communicationFailure
+                }
+                guard activateResp.isSuccess else {
+                    throw DiaconnPumpManagerError.settingFailed(
+                        DiaconnPacketType.SettingResult(rawValue: Int(activateResp.result)) ?? .protocolError
+                    )
+                }
+                try self.confirmSettingCommand(
+                    reqMsgType: DiaconnPacketType.BASAL_INJECTION_SETTING,
+                    otpNumber: activateResp.otpNumber
+                )
+
                 self.state.basalSchedule = basalSchedule
                 self.notifyStateDidChange()
 

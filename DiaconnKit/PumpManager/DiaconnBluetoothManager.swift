@@ -55,6 +55,11 @@ public class DiaconnBluetoothManager: NSObject {
     private let responseSemaphore = DispatchSemaphore(value: 0)
     private var lastResponse: Data?
 
+    /// Report-wait support: lets callers block until a specific report packet arrives.
+    private let reportLock = NSLock()
+    private var reportArrived: [UInt8: Bool] = [:]
+    private var reportSemaphores: [UInt8: DispatchSemaphore] = [:]
+
     /// For test/debug: called when a complete packet is received (raw bytes)
     public var onRawPacketReceived: ((Data) -> Void)?
 
@@ -139,6 +144,37 @@ public class DiaconnBluetoothManager: NSObject {
         while responseSemaphore.wait(timeout: .now()) == .success {}
         lastResponse = nil
         readBuffer = Data()
+    }
+
+    /// Clear any previously-buffered "arrived" flag for the given report msgType.
+    /// Call this just before sending the command whose report we want to wait for.
+    public func resetReportFlag(_ msgType: UInt8) {
+        reportLock.lock()
+        reportArrived[msgType] = false
+        reportLock.unlock()
+    }
+
+    /// Block until the given report msgType arrives (or timeout).
+    /// Returns true if the report arrived, false on timeout.
+    public func waitForReport(msgType: UInt8, timeout: TimeInterval = 5.0) -> Bool {
+        reportLock.lock()
+        if reportArrived[msgType] == true {
+            reportArrived[msgType] = false
+            reportLock.unlock()
+            return true
+        }
+        let sem = DispatchSemaphore(value: 0)
+        reportSemaphores[msgType] = sem
+        reportLock.unlock()
+
+        let result = sem.wait(timeout: .now() + timeout)
+
+        reportLock.lock()
+        reportSemaphores.removeValue(forKey: msgType)
+        reportArrived[msgType] = false
+        reportLock.unlock()
+
+        return result != .timedOut
     }
 
     /// Send an already-encoded packet and wait for response (prevents double transmission)
@@ -463,6 +499,12 @@ extension DiaconnBluetoothManager: CBPeripheralDelegate {
     /// Handle unsolicited report packets
     private func handleReportPacket(msgType: UInt8, data: Data) {
         let payload = DiaconnPacketDecoder.getPayload(data)
+
+        // Notify anyone waiting for this report msgType
+        reportLock.lock()
+        reportArrived[msgType] = true
+        reportSemaphores[msgType]?.signal()
+        reportLock.unlock()
 
         switch msgType {
         case DiaconnPacketType.INJECTION_PROGRESS_REPORT:

@@ -301,7 +301,8 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         minorVersion = pumpStatus.minorVersion
 
         // Basal profile
-        basalPattern = pumpStatus.currentBasePattern
+        // Pump returns 0 after factory reset (no pattern selected); pattern must be 1~6 when writing.
+        basalPattern = (1 ... 6).contains(pumpStatus.currentBasePattern) ? pumpStatus.currentBasePattern : 1
         basalSchedule = pumpStatus.basalProfile
         currentBasalRate = pumpStatus.basalAmount
 

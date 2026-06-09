@@ -38,6 +38,10 @@ public enum DiaconnPacketType {
     public static let BASAL_SETTING: UInt8 = 0x0B
     public static let BASAL_SETTING_RESPONSE: UInt8 = 0x8B
 
+    /// Basal injection (pattern select): pattern(1~6)
+    public static let BASAL_INJECTION_SETTING: UInt8 = 0x0C
+    public static let BASAL_INJECTION_SETTING_RESPONSE: UInt8 = 0x8C
+
     /// Extended bolus setting
     public static let INJECTION_EXTENDED_BOLUS_SETTING: UInt8 = 0x08
     public static let INJECTION_EXTENDED_BOLUS_SETTING_RESPONSE: UInt8 = 0x88

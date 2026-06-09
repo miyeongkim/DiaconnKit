@@ -173,3 +173,36 @@ func parseBasalSettingResponse(_ data: Data) -> BasalSettingResponse? {
         otpNumber: DiaconnPacketDecoder.readInt(payload, offset: 1)
     )
 }
+
+// MARK: - Basal injection / pattern select (msgType: 0x0C)
+
+/// Select active basal pattern (1~6).
+/// Required after writing basal profile so the pump activates the chosen pattern,
+/// especially after factory reset where currentBasePattern returns 0.
+func generateBasalInjectionSettingPacket(pattern: UInt8) -> Data {
+    var payload = Data()
+    payload.append(pattern)
+    return DiaconnPacketEncoder.encode(
+        msgType: DiaconnPacketType.BASAL_INJECTION_SETTING,
+        payload: payload
+    )
+}
+
+/// Parse basal injection response (msgType: 0x8C)
+struct BasalInjectionSettingResponse {
+    let result: UInt8
+    let otpNumber: UInt32
+
+    var isSuccess: Bool { result == 0 }
+}
+
+func parseBasalInjectionSettingResponse(_ data: Data) -> BasalInjectionSettingResponse? {
+    guard DiaconnPacketDecoder.validatePacket(data) == 0 else { return nil }
+    let payload = DiaconnPacketDecoder.getPayload(data)
+    guard payload.count >= 5 else { return nil }
+
+    return BasalInjectionSettingResponse(
+        result: DiaconnPacketDecoder.readByte(payload, offset: 0),
+        otpNumber: DiaconnPacketDecoder.readInt(payload, offset: 1)
+    )
+}
