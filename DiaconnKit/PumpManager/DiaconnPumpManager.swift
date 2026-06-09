@@ -684,11 +684,21 @@ extension DiaconnPumpManager: PumpManager {
         log.info("enactBolus: \(units)U activationType=\(activationType)")
         state.lastBolusAutomatic = (activationType == .automatic)
 
-        guard state.isConnected else {
-            completion(.communication(DiaconnPumpManagerError.notConnected))
-            return
+        ensureConnected { [weak self] connected in
+            guard let self = self else { return }
+            guard connected else {
+                completion(.communication(DiaconnPumpManagerError.notConnected))
+                return
+            }
+            self.performEnactBolus(units: units, activationType: activationType, completion: completion)
         }
+    }
 
+    private func performEnactBolus(
+        units: Double,
+        activationType _: BolusActivationType,
+        completion: @escaping (PumpManagerError?) -> Void
+    ) {
         guard state.bolusState == .noBolus else {
             completion(.communication(DiaconnPumpManagerError.bolusInProgress))
             return
@@ -815,10 +825,22 @@ extension DiaconnPumpManager: PumpManager {
         let durationMinutes = Int(duration / 60)
         log.info("enactTempBasal: \(unitsPerHour)U/hr for \(durationMinutes)min")
 
-        guard state.isConnected else {
-            completion(.communication(DiaconnPumpManagerError.notConnected))
-            return
+        ensureConnected { [weak self] connected in
+            guard let self = self else { return }
+            guard connected else {
+                completion(.communication(DiaconnPumpManagerError.notConnected))
+                return
+            }
+            self.performEnactTempBasal(unitsPerHour: unitsPerHour, for: duration, completion: completion)
         }
+    }
+
+    private func performEnactTempBasal(
+        unitsPerHour: Double,
+        for duration: TimeInterval,
+        completion: @escaping (PumpManagerError?) -> Void
+    ) {
+        let durationMinutes = Int(duration / 60)
 
         cloudSyncTask?.cancel()
         cloudSyncTask = nil
@@ -1024,12 +1046,54 @@ extension DiaconnPumpManager: PumpManager {
         }
     }
 
+    /// Reconnect if not currently connected. Completion(true) means the pump is ready for commands.
+    private func ensureConnected(completion: @escaping (Bool) -> Void) {
+        if bluetooth.isConnected {
+            completion(true)
+            return
+        }
+        guard let bleIdentifier = state.bleIdentifier else {
+            log.error("ensureConnected: no bleIdentifier saved")
+            completion(false)
+            return
+        }
+        log.info("ensureConnected: not connected — reconnecting to \(bleIdentifier)")
+        bluetooth.connect(bleIdentifier) { [weak self] result in
+            switch result {
+            case .success:
+                self?.log.info("ensureConnected: reconnected")
+                completion(true)
+            case let .failure(error):
+                self?.log.error("ensureConnected: reconnect failed: \(error.localizedDescription)")
+                completion(false)
+            case .timeout:
+                self?.log.error("ensureConnected: reconnect timed out")
+                completion(false)
+            }
+        }
+    }
+
     public func syncBasalRateSchedule(
         items scheduleItems: [RepeatingScheduleValue<Double>],
         completion: @escaping (Result<BasalRateSchedule, Error>) -> Void
     ) {
         let basalSchedule = DiaconnPumpManagerState.convertBasal(scheduleItems)
 
+        ensureConnected { [weak self] connected in
+            guard let self = self else { return }
+            guard connected else {
+                completion(.failure(PumpManagerError.communication(DiaconnPumpManagerError.notConnected)))
+                return
+            }
+            self.performBasalRateScheduleSync(items: scheduleItems, basalSchedule: basalSchedule, completion: completion)
+        }
+    }
+
+    private func performBasalRateScheduleSync(
+        items scheduleItems: [RepeatingScheduleValue<Double>],
+        basalSchedule: [Double],
+        completion: @escaping (Result<BasalRateSchedule, Error>) -> Void
+    ) {
         pumpQueue.async { [weak self] in
             guard let self = self else { return }
 
