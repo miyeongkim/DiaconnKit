@@ -40,6 +40,10 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
     private let cloudUploader = DiaconnCloudUploader()
     private var cloudSyncTask: Task<Void, Never>?
 
+    /// Guards re-entry of the auto-correction sync triggered from fetchPumpStatus.
+    /// Mutated only on pumpQueue.
+    private var isAutoSyncingBasal: Bool = false
+
     // MARK: - Init
 
     init(state: DiaconnPumpManagerState) {
@@ -514,6 +518,11 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
 
                 // Fetch pump logs and store in Trio history
                 self.syncLogHistory()
+
+                // Auto-correct: if the pump's current-hour basal differs from the app's saved profile,
+                // re-push the app profile. Scheduled after this block via pumpQueue so fetchPumpStatus
+                // completes promptly before the heavy 15s+ sync runs.
+                self.autoSyncBasalIfDrifted(pumpStatus: pumpStatus)
 
                 completion(.success(pumpStatus))
 
@@ -1159,6 +1168,7 @@ extension DiaconnPumpManager: PumpManager {
                 )
 
                 self.state.basalSchedule = basalSchedule
+                self.state.appBasalSchedule = basalSchedule
                 self.notifyStateDidChange()
 
                 if let schedule = BasalRateSchedule(dailyItems: scheduleItems) {
@@ -1170,6 +1180,68 @@ extension DiaconnPumpManager: PumpManager {
             } catch {
                 self.log.error("syncBasalRateSchedule failed: \(error)")
                 completion(.failure(error))
+            }
+        }
+    }
+
+    /// Compare the pump's current-hour basal against the app's saved profile and re-push the app
+    /// profile if they have drifted. Called from `fetchPumpStatus` on `pumpQueue`.
+    ///
+    /// - No-op until the user has saved a basal profile at least once (`appBasalSchedule` empty).
+    /// - Re-entry guarded by `isAutoSyncingBasal` so a long-running sync isn't queued twice.
+    /// - The sync itself is dispatched back onto `pumpQueue` so `fetchPumpStatus` returns promptly
+    ///   before the heavy 15s flash-commit + pattern activation runs.
+    private func autoSyncBasalIfDrifted(pumpStatus: DiaconnPumpStatus) {
+        log
+            .info(
+                "[autoSyncBasal] enter — appCount=\(state.appBasalSchedule.count) pumpHour=\(pumpStatus.basalHour) pumpAmount=\(pumpStatus.basalAmount)"
+            )
+        guard !isAutoSyncingBasal else {
+            log.info("[autoSyncBasal] skip — sync already in flight")
+            return
+        }
+        let appProfile = state.appBasalSchedule
+        guard appProfile.count == 24 else {
+            log.info("[autoSyncBasal] skip — app profile not initialized (count=\(appProfile.count))")
+            return
+        }
+
+        // Use the pump's reported basalHour so we compare apples-to-apples: basalAmount is the
+        // scheduled rate at that exact hour slot on the pump. (Time sync earlier in fetchPumpStatus
+        // keeps this aligned with wall-clock, but using basalHour is safer against drift.)
+        let hour = Int(pumpStatus.basalHour)
+        guard (0 ..< 24).contains(hour) else {
+            log.info("[autoSyncBasal] skip — pump basalHour out of range (\(hour))")
+            return
+        }
+
+        let appRate = appProfile[hour]
+        let pumpRate = pumpStatus.basalAmount
+        let tolerance = 0.001
+        guard abs(appRate - pumpRate) > tolerance else {
+            log.info("[autoSyncBasal] no drift at hour=\(hour): app=\(appRate)U/h pump=\(pumpRate)U/h")
+            return
+        }
+
+        log.info(
+            "[autoSyncBasal] drift detected at hour=\(hour): app=\(appRate)U/h pump=\(pumpRate)U/h — re-pushing app profile"
+        )
+
+        let scheduleItems = (0 ..< 24).map { i in
+            RepeatingScheduleValue(startTime: TimeInterval(i * 3600), value: appProfile[i])
+        }
+
+        isAutoSyncingBasal = true
+        performBasalRateScheduleSync(items: scheduleItems, basalSchedule: appProfile) { [weak self] result in
+            guard let self = self else { return }
+            self.pumpQueue.async {
+                self.isAutoSyncingBasal = false
+            }
+            switch result {
+            case .success:
+                self.log.info("[autoSyncBasal] re-push succeeded")
+            case let .failure(error):
+                self.log.error("[autoSyncBasal] re-push failed: \(error)")
             }
         }
     }

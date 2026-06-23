@@ -48,7 +48,11 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
     // MARK: - Insulin Delivery
 
     internal var insulinType: InsulinType?
-    internal var basalSchedule: [Double] // 24-hour basal profile (U/h)
+    internal var basalSchedule: [Double] // 24-hour basal profile (U/h) — mirrors what the pump reports
+    /// 24-hour basal profile last pushed from the app via syncBasalRateSchedule.
+    /// Used as the source of truth when auto-correcting drift between app settings and pump state.
+    /// Empty until the user saves a profile at least once.
+    internal var appBasalSchedule: [Double] = []
     internal var basalPattern: UInt8 = 1 // Current basal pattern (1~6)
     internal var currentBasalRate: Double = 0 // Current hour basal rate
 
@@ -184,6 +188,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         firmwareVersion = rawValue["firmwareVersion"] as? String
         serialNumber = rawValue["serialNumber"] as? String
         basalSchedule = rawValue["basalSchedule"] as? [Double] ?? []
+        appBasalSchedule = rawValue["appBasalSchedule"] as? [Double] ?? []
         basalPattern = rawValue["basalPattern"] as? UInt8 ?? 1
         basalDeliveryDate = rawValue["basalDeliveryDate"] as? Date ?? .now
         tempBasalUnits = rawValue["tempBasalUnits"] as? Double
@@ -249,6 +254,7 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
         value["serialNumber"] = serialNumber
         value["insulinType"] = insulinType?.rawValue
         value["basalSchedule"] = basalSchedule
+        value["appBasalSchedule"] = appBasalSchedule
         value["basalPattern"] = basalPattern
         value["basalDeliveryDate"] = basalDeliveryDate
         value["basalDeliveryOrdinal"] = basalDeliveryOrdinal.rawValue
