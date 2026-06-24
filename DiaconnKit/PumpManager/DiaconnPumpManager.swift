@@ -1173,22 +1173,31 @@ extension DiaconnPumpManager: PumpManager {
                     self.log.info("syncBasalRateSchedule: 0xCB not received within 30s — proceeding to activation anyway")
                 }
 
-                // Activate the pattern (required after factory reset so currentBasePattern is no longer 0)
+                // Activate the pattern. Required after factory reset (when the pump has
+                // no active pattern). When a pattern is already active on the pump, the
+                // pump returns `basalSettingRequired` (code 15) — counter-intuitively,
+                // this means "no activation needed, pattern is already running". The
+                // 0x0B profile write above is what actually updates the rates and was
+                // already committed (confirmed by 0xCB), so we treat code 15 as success.
                 let activatePacket = generateBasalInjectionSettingPacket(pattern: self.state.basalPattern)
                 guard let activateData = try self.bluetooth.writeAndWait(packet: activatePacket),
                       let activateResp = parseBasalInjectionSettingResponse(activateData)
                 else {
                     throw DiaconnPumpManagerError.communicationFailure
                 }
-                guard activateResp.isSuccess else {
-                    throw DiaconnPumpManagerError.settingFailed(
-                        DiaconnPacketType.SettingResult(rawValue: Int(activateResp.result)) ?? .protocolError
+                if activateResp.isSuccess {
+                    try self.confirmSettingCommand(
+                        reqMsgType: DiaconnPacketType.BASAL_INJECTION_SETTING,
+                        otpNumber: activateResp.otpNumber
                     )
+                } else {
+                    let result = DiaconnPacketType.SettingResult(rawValue: Int(activateResp.result))
+                    if result == .basalSettingRequired {
+                        self.log.info("syncBasalRateSchedule: 0x0C returned basalSettingRequired — pattern already active, skipping activation OTP")
+                    } else {
+                        throw DiaconnPumpManagerError.settingFailed(result ?? .protocolError)
+                    }
                 }
-                try self.confirmSettingCommand(
-                    reqMsgType: DiaconnPacketType.BASAL_INJECTION_SETTING,
-                    otpNumber: activateResp.otpNumber
-                )
 
                 self.state.basalSchedule = basalSchedule
                 self.state.appBasalSchedule = basalSchedule
