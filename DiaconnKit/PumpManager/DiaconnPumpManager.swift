@@ -588,13 +588,20 @@ extension DiaconnPumpManager: PumpManager {
     }
 
     public var supportedBolusVolumes: [Double] {
-        // Diaconn G8 minimum bolus is 0.02U; pump rejects 0.01U with parameterError
-        stride(from: 0.02, through: max(state.maxBolus, 30.0), by: 0.01).map { $0 }
+        // Diaconn G8 minimum bolus is 0.02U; pump rejects 0.01U with parameterError.
+        // Integer-based to avoid `stride` floating-point drift which breaks Loop's
+        // strict `supportedBolusVolumes.contains(value)` validation.
+        let maxInt = Int((max(state.maxBolus, 30.0) * 100).rounded())
+        return (2 ... maxInt).map { Double($0) / 100.0 }
     }
 
     public var supportedBasalRates: [Double] {
-        // Diaconn G8: max basal 3U/h, temp basal up to 7.5U/h, 0.01U increments
-        stride(from: 0.01, through: max(state.maxBasalPerHour, 3.0), by: 0.01).map { $0 }
+        // Diaconn G8: max basal 3U/h, temp basal up to 7.5U/h, 0.01U increments.
+        // Integer-based to avoid `stride` drift (the 95th stride value is
+        // 0.95000000000000006661 instead of 0.95) which makes Loop's
+        // `supportedBasalRates.contains(value)` reject valid rates.
+        let maxInt = Int((max(state.maxBasalPerHour, 3.0) * 100).rounded())
+        return (1 ... maxInt).map { Double($0) / 100.0 }
     }
 
     public var maximumBasalScheduleEntryCount: Int {
