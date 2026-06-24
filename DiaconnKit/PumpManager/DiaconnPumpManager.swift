@@ -1124,6 +1124,9 @@ extension DiaconnPumpManager: PumpManager {
                     throw DiaconnPumpManagerError.notConnected
                 }
 
+                // Clear any stale 0xCB flag so we can detect this run's completion report.
+                self.bluetooth.resetReportFlag(DiaconnPacketType.BASAL_SETTING_REPORT)
+
                 // Send all packets except the last one first
                 for packet in packets.dropLast() {
                     self.bluetooth.peripheral?.writeValue(packet, for: writeChar, type: .withoutResponse)
@@ -1152,10 +1155,23 @@ extension DiaconnPumpManager: PumpManager {
                     otpNumber: response.otpNumber
                 )
 
-                // Pump takes 10s+ to commit the basal profile to flash after OTP confirm.
-                // 0xCB / 0xE8 reports fire before commit is fully done, so they aren't reliable
-                // gates. Sleep 15s before attempting pattern activation.
-                Thread.sleep(forTimeInterval: 15.0)
+                // Pump takes 10~25s to commit the basal profile to flash after OTP confirm.
+                // The actual completion is signalled by the 0xCB BASAL_SETTING_REPORT.
+                // Earlier code used a fixed 15s sleep, but on some pumps (firmware 3.57)
+                // the commit isn't done at 15s and 0x0C activation fires too early →
+                // pump returns `basalSettingRequired` (code 15). Wait for the report
+                // instead, with a 30s timeout. Add a small post-report buffer in case
+                // the report fires slightly before the flash write has fully settled.
+                let reportArrived = self.bluetooth.waitForReport(
+                    msgType: DiaconnPacketType.BASAL_SETTING_REPORT,
+                    timeout: 30.0
+                )
+                if reportArrived {
+                    self.log.info("syncBasalRateSchedule: 0xCB received — pump committed profile")
+                    Thread.sleep(forTimeInterval: 1.0)
+                } else {
+                    self.log.info("syncBasalRateSchedule: 0xCB not received within 30s — proceeding to activation anyway")
+                }
 
                 // Activate the pattern (required after factory reset so currentBasePattern is no longer 0)
                 let activatePacket = generateBasalInjectionSettingPacket(pattern: self.state.basalPattern)
