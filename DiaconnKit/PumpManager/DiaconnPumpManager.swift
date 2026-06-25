@@ -122,16 +122,30 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
         case .initiating:
             return .initiating
         case .inProgress:
-            // Create from current bolus info instead of DoseEntry
+            let totalUnits = state.totalUnits ?? state.lastBolusAmount
+            let startDate = state.lastBolusDate ?? Date()
+            let deliveredUnits = state.deliveredUnits ?? 0
+            // Project endDate from the observed delivery rate so Loop's status row keeps rendering
+            // for the full bolus, even when our static estimate is shorter than actual delivery.
+            // Final completion is signaled by notifyBolusDone, not by endDate expiry.
+            let elapsed = Date().timeIntervalSince(startDate)
+            let projectedEnd: Date
+            if deliveredUnits > 0, elapsed > 0, totalUnits > deliveredUnits {
+                let remaining = (totalUnits - deliveredUnits) * elapsed / deliveredUnits
+                projectedEnd = Date().addingTimeInterval(remaining + 5)
+            } else {
+                projectedEnd = startDate.addingTimeInterval(estimatedDuration(toBolus: totalUnits))
+            }
+            let endDate = max(projectedEnd, Date().addingTimeInterval(5))
             let dose = DoseEntry(
                 type: .bolus,
-                startDate: state.lastBolusDate ?? Date(),
-                endDate: nil,
-                value: state.totalUnits ?? state.lastBolusAmount,
+                startDate: startDate,
+                endDate: endDate,
+                value: totalUnits,
                 unit: .units,
                 deliveredUnits: state.deliveredUnits,
                 description: "Bolus in progress",
-                syncIdentifier: UUID().uuidString,
+                syncIdentifier: "diaconn-bolus-\(startDate.timeIntervalSinceReferenceDate)",
                 scheduledBasalRate: nil
             )
             return .inProgress(dose)
@@ -681,6 +695,11 @@ extension DiaconnPumpManager: PumpManager {
     }
 
     public func createBolusProgressReporter(reportingOn dispatchQueue: DispatchQueue) -> DoseProgressReporter? {
+        // Idempotent: hosts (e.g. Trio) may call this on every status update;
+        // returning the existing reporter keeps already-attached observers alive.
+        if let existing = doseReporter {
+            return existing
+        }
         let reporter = DiaconnDoseProgressReporter(dispatchQueue: dispatchQueue)
         if let totalUnits = state.totalUnits {
             reporter.totalUnits = totalUnits
@@ -1981,6 +2000,8 @@ extension DiaconnPumpManager {
         }
         state.deliveredUnits = deliveredUnits
         doseReporter?.notify(deliveredUnits: deliveredUnits, done: false)
+        // Push a status update so Loop re-evaluates the in-progress dose (endDate projection)
+        notifyStateDidChange()
     }
 
     func notifyBolusError() {

@@ -15,6 +15,11 @@ internal class DiaconnDoseProgressReporter: DoseProgressReporter {
 
     internal func addObserver(_ observer: DoseProgressObserver) {
         dispatchQueue.async {
+            // Hosts may re-register on every status update; dedupe to avoid duplicate callbacks.
+            guard !self.observers.contains(where: { $0 === observer }) else {
+                observer.doseProgressReporterDidUpdate(self)
+                return
+            }
             self.observers.append(observer)
             // Notify immediately so the observer gets the current progress state
             observer.doseProgressReporterDidUpdate(self)
