@@ -1517,10 +1517,13 @@ extension DiaconnPumpManager: PumpManager {
         let storedLast = Int(state.storedLastLogNum)
         let storedWrap = Int(state.storedWrappingCount)
 
-        // On wrap: sync remainder of old wrap (storedLast+1~9999) then reset to new wrap baseline
+        // On wrap: sync remainder of old wrap (storedLast+1~9999) then reset to new wrap baseline.
+        // End bound is 10000 (exclusive-style), matching AndroidAPS getLogLoopCount's
+        // `end = 10000`. With 9999 the last page never covers entry 9999 itself
+        // (storedLast=9998 → start=9999, end=9999 → loopSize=0), dropping that dose.
         let isWrapSync = pumpWrap > storedWrap
         let startLogNum = storedLast + 1
-        let endLogNum = isWrapSync ? 9999 : pumpLast
+        let endLogNum = isWrapSync ? 10000 : pumpLast
 
         if isWrapSync {
             NSLog("[DiaconnKit] BIG_LOG_INQUIRE: wrap sync — \(startLogNum)~9999")
@@ -1534,6 +1537,18 @@ extension DiaconnPumpManager: PumpManager {
         let loopSize = Int(ceil(Double(endLogNum - startLogNum) / Double(pageSize)))
         guard loopSize > 0 else {
             NSLog("[DiaconnKit] BIG_LOG_INQUIRE: loopSize=0 — skipping")
+            if isWrapSync {
+                // Wrap detected while the old wrap is already fully consumed
+                // (storedLast=9999 → nothing left to fetch from it). The cursor
+                // must still reset to the new wrap baseline; otherwise every
+                // future sync recomputes this same dead path (isWrapSync=true,
+                // loopSize<=0) and no log is ever fetched again — silently
+                // dropping all subsequent doses from IOB. Mirrors AndroidAPS
+                // getCloudLogLoopCount's explicit `platformPumpLogNum >= 9999`
+                // branch ("start = 0 // 처음부터 시작").
+                NSLog("[DiaconnKit] BIG_LOG_INQUIRE: wrap at fully-synced boundary — resetting cursor to wrap=\(pumpWrap) logNum=0")
+                return ([], LogSyncCursor(lastLogNum: 0, wrappingCount: UInt8(pumpWrap)))
+            }
             return ([], nil)
         }
 
@@ -1681,7 +1696,12 @@ extension DiaconnPumpManager: PumpManager {
                 }
 
                 if entries.isEmpty {
-                    // Nothing fetched; cursor is nil, nothing to commit.
+                    // No entries fetched. A non-nil cursor here means a cursor-only
+                    // transition (wrap at the fully-synced boundary); there is nothing
+                    // for the host to store, so commit it immediately.
+                    if let cursor = cursor {
+                        self.commitLogCursor(cursor)
+                    }
                 } else {
                     let events = self.logEntriesToPumpEvents(entries)
                     NSLog("[DiaconnKit] syncLogHistory: \(entries.count) entries → \(events.count) events")
