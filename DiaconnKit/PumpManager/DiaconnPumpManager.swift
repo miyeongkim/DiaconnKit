@@ -1438,8 +1438,13 @@ extension DiaconnPumpManager: PumpManager {
             guard let self = self else { return }
 
             do {
-                let entries = try self.fetchNewLogEntries()
+                let (entries, cursor) = try self.fetchNewLogEntries()
                 let doses = self.logEntriesToDoses(entries)
+                // reconcileDoses hands the doses straight back to the caller synchronously,
+                // so the cursor can advance immediately (matches the pre-existing behavior).
+                if let cursor = cursor {
+                    self.commitLogCursor(cursor)
+                }
                 completion(.success(doses))
             } catch {
                 self.log.error("reconcileDoses failed: \(error)")
@@ -1448,8 +1453,38 @@ extension DiaconnPumpManager: PumpManager {
         }
     }
 
-    /// Fetch new logs since last sync from pump and update cursor.
-    private func fetchNewLogEntries() throws -> [DiaconnLogEntry] {
+    /// Position in the pump's log ring that has been *consumed*. It must only be
+    /// persisted AFTER the host confirms it has durably stored the corresponding
+    /// pump events. Advancing it earlier (the previous behavior) meant that a crash
+    /// during host-side persistence permanently skipped those doses on the next
+    /// launch, collapsing IOB and causing insulin stacking.
+    private struct LogSyncCursor {
+        let lastLogNum: UInt16
+        let wrappingCount: UInt8
+    }
+
+    /// Persist the consumed-log cursor. Always dispatched onto `pumpQueue` because
+    /// callers may invoke it from a host completion handler on an arbitrary thread.
+    private func commitLogCursor(_ cursor: LogSyncCursor) {
+        pumpQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.state.storedLastLogNum = cursor.lastLogNum
+            self.state.storedWrappingCount = cursor.wrappingCount
+            self.notifyStateDidChange()
+            NSLog(
+                "[DiaconnKit] commitLogCursor: storedLast=\(cursor.lastLogNum) storedWrap=\(cursor.wrappingCount)"
+            )
+        }
+    }
+
+    /// Fetch new logs since last sync from the pump.
+    ///
+    /// This intentionally does NOT advance the consumed-log cursor. It returns the
+    /// cursor the caller should commit via `commitLogCursor(_:)` *only after* the
+    /// fetched events have been durably stored by the host. If a fetch page fails,
+    /// nothing is committed and the whole range is re-fetched next cycle (safe: the
+    /// events are reported to the host at most once, after all pages succeed).
+    private func fetchNewLogEntries() throws -> (entries: [DiaconnLogEntry], cursor: LogSyncCursor?) {
         let pumpLastLogNum = state.pumpLastLogNum
         let pumpWrapCount = state.pumpWrappingCount
 
@@ -1472,7 +1507,7 @@ extension DiaconnPumpManager: PumpManager {
             pumpWrapCount != state.storedWrappingCount
         else {
             log.info("No new log entries since last sync")
-            return []
+            return ([], nil)
         }
 
         // 3. BIG_LOG_INQUIRE: sync only normal range (on wrap, reset baseline without bulk syncing old logs)
@@ -1499,10 +1534,12 @@ extension DiaconnPumpManager: PumpManager {
         let loopSize = Int(ceil(Double(endLogNum - startLogNum) / Double(pageSize)))
         guard loopSize > 0 else {
             NSLog("[DiaconnKit] BIG_LOG_INQUIRE: loopSize=0 — skipping")
-            return []
+            return ([], nil)
         }
 
         var allEntries: [DiaconnLogEntry] = []
+        // Cursor to commit *after* the host durably stores the events (see commitLogCursor).
+        var pendingCursor: LogSyncCursor?
 
         for i in 0 ..< loopSize {
             let pageStart = startLogNum + i * pageSize
@@ -1522,22 +1559,19 @@ extension DiaconnPumpManager: PumpManager {
             allEntries.append(contentsOf: entries)
 
             if let last = entries.last {
-                state.storedLastLogNum = last.logNum
                 // Use pump's current wrapCount, not per-entry value (old logs may have different wrap)
-                state.storedWrappingCount = pumpWrapCount
-                notifyStateDidChange()
+                pendingCursor = LogSyncCursor(lastLogNum: last.logNum, wrappingCount: pumpWrapCount)
             }
         }
 
         if isWrapSync {
-            state.storedWrappingCount = UInt8(pumpWrap)
-            state.storedLastLogNum = 0
-            notifyStateDidChange()
-            NSLog("[DiaconnKit] BIG_LOG_INQUIRE: wrap sync done — reset to wrap=\(pumpWrap) logNum=0")
+            // After syncing the remainder of the old wrap, the cursor resets to the new wrap baseline.
+            pendingCursor = LogSyncCursor(lastLogNum: 0, wrappingCount: UInt8(pumpWrap))
+            NSLog("[DiaconnKit] BIG_LOG_INQUIRE: wrap sync done — will reset to wrap=\(pumpWrap) logNum=0 after host stores")
         }
 
         log.info("Fetched \(allEntries.count) new log entries")
-        return allEntries
+        return (allEntries, pendingCursor)
     }
 
     /// Convert DiaconnLogEntry array to LoopKit DoseEntry array
@@ -1630,7 +1664,7 @@ extension DiaconnPumpManager: PumpManager {
                     self.state.pumpWrappingCount = logStatus.wrappingCount
                 }
 
-                let entries = try self.fetchNewLogEntries()
+                let (entries, cursor) = try self.fetchNewLogEntries()
 
                 // Detect device lifecycle events from log entries
                 for entry in entries {
@@ -1646,7 +1680,9 @@ extension DiaconnPumpManager: PumpManager {
                     }
                 }
 
-                if !entries.isEmpty {
+                if entries.isEmpty {
+                    // Nothing fetched; cursor is nil, nothing to commit.
+                } else {
                     let events = self.logEntriesToPumpEvents(entries)
                     NSLog("[DiaconnKit] syncLogHistory: \(entries.count) entries → \(events.count) events")
                     for event in events {
@@ -1658,10 +1694,22 @@ extension DiaconnPumpManager: PumpManager {
                             "[DiaconnKit]   event: title=\(event.title) eventType=\(String(describing: event.type)) \(doseDesc)"
                         )
                     }
-                    if !events.isEmpty {
+                    if events.isEmpty {
+                        // Entries existed but produced no reportable dose events (e.g. only
+                        // filtered alarms). The host has nothing to store, so advancing the
+                        // cursor now is safe and prevents re-fetching these forever.
+                        if let cursor = cursor {
+                            self.commitLogCursor(cursor)
+                        }
+                    } else {
                         let now = Date()
                         self.pumpDelegate.notify { delegate in
-                            guard let delegate = delegate else { return }
+                            guard let delegate = delegate else {
+                                // No delegate to store events; leave the cursor un-advanced so
+                                // the next sync re-reports them.
+                                NSLog("[DiaconnKit] syncLogHistory: no delegate — cursor NOT advanced, will retry")
+                                return
+                            }
                             delegate.pumpManager(
                                 self,
                                 hasNewPumpEvents: events,
@@ -1669,9 +1717,18 @@ extension DiaconnPumpManager: PumpManager {
                                 replacePendingEvents: false
                             ) { error in
                                 if let error = error {
-                                    NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents error: \(error)")
+                                    // Host failed to persist. Do NOT advance the cursor; the same
+                                    // entries are re-fetched and re-reported on the next sync.
+                                    NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents error: \(error) — cursor NOT advanced, will retry")
                                 } else {
+                                    // Host durably stored the events. Only now is it safe to advance
+                                    // the consumed-log cursor. This is the fix that prevents a crash
+                                    // during host persistence from permanently dropping doses (which
+                                    // collapsed IOB and caused insulin stacking).
                                     NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents stored OK")
+                                    if let cursor = cursor {
+                                        self.commitLogCursor(cursor)
+                                    }
                                 }
                             }
                         }
