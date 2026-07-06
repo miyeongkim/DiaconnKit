@@ -1471,9 +1471,8 @@ extension DiaconnPumpManager: PumpManager {
             self.state.storedLastLogNum = cursor.lastLogNum
             self.state.storedWrappingCount = cursor.wrappingCount
             self.notifyStateDidChange()
-            NSLog(
-                "[DiaconnKit] commitLogCursor: storedLast=\(cursor.lastLogNum) storedWrap=\(cursor.wrappingCount)"
-            )
+            // log.info (not NSLog) so this lands in the exported log file for bench verification.
+            self.log.info("commitLogCursor: storedLast=\(cursor.lastLogNum) storedWrap=\(cursor.wrappingCount)")
         }
     }
 
@@ -1546,7 +1545,7 @@ extension DiaconnPumpManager: PumpManager {
                 // dropping all subsequent doses from IOB. Mirrors AndroidAPS
                 // getCloudLogLoopCount's explicit `platformPumpLogNum >= 9999`
                 // branch ("start = 0 // 처음부터 시작").
-                NSLog("[DiaconnKit] BIG_LOG_INQUIRE: wrap at fully-synced boundary — resetting cursor to wrap=\(pumpWrap) logNum=0")
+                log.info("BIG_LOG_INQUIRE: wrap at fully-synced boundary — resetting cursor to wrap=\(pumpWrap) logNum=0")
                 return ([], LogSyncCursor(lastLogNum: 0, wrappingCount: UInt8(pumpWrap)))
             }
             return ([], nil)
@@ -1739,7 +1738,7 @@ extension DiaconnPumpManager: PumpManager {
                                 if let error = error {
                                     // Host failed to persist. Do NOT advance the cursor; the same
                                     // entries are re-fetched and re-reported on the next sync.
-                                    NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents error: \(error) — cursor NOT advanced, will retry")
+                                    self.log.error("syncLogHistory: hasNewPumpEvents error: \(error) — cursor NOT advanced, will retry")
                                 } else {
                                     // Host durably stored the events. Only now is it safe to advance
                                     // the consumed-log cursor. This is the fix that prevents a crash
