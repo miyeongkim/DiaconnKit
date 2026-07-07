@@ -136,13 +136,8 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
             } else {
                 projectedEnd = startDate.addingTimeInterval(estimatedDuration(toBolus: totalUnits))
             }
-            // Physical ceiling: no Diaconn bolus takes anywhere near 30 minutes
-            // (max 30U finishes in a few minutes). Unbounded extrapolation can
-            // produce year-scale endDates when the inputs are poisoned — e.g. a
-            // foreign bolus's progress reports arriving over the shared BLE link
-            // while lastBolusDate still points at this app's own bolus from days
-            // ago. Clamp so a bad projection degrades to an early-closing
-            // progress row instead of an absurd future-dated dose.
+            // Physical ceiling — no bolus runs near 30 min; keeps a poisoned
+            // projection from producing a far-future endDate.
             let endDate = min(
                 max(projectedEnd, Date().addingTimeInterval(5)),
                 Date().addingTimeInterval(30 * 60)
@@ -1450,8 +1445,7 @@ extension DiaconnPumpManager: PumpManager {
             do {
                 let (entries, cursor) = try self.fetchNewLogEntries()
                 let doses = self.logEntriesToDoses(entries)
-                // reconcileDoses hands the doses straight back to the caller synchronously,
-                // so the cursor can advance immediately (matches the pre-existing behavior).
+                // Doses go straight back to the caller — safe to advance the cursor now.
                 if let cursor = cursor {
                     self.commitLogCursor(cursor)
                 }
@@ -1463,36 +1457,26 @@ extension DiaconnPumpManager: PumpManager {
         }
     }
 
-    /// Position in the pump's log ring that has been *consumed*. It must only be
-    /// persisted AFTER the host confirms it has durably stored the corresponding
-    /// pump events. Advancing it earlier (the previous behavior) meant that a crash
-    /// during host-side persistence permanently skipped those doses on the next
-    /// launch, collapsing IOB and causing insulin stacking.
+    /// Consumed-log position. Persist only after the host confirms it stored the
+    /// events — advancing earlier loses doses (and IOB) if the host crashes mid-save.
     private struct LogSyncCursor {
         let lastLogNum: UInt16
         let wrappingCount: UInt8
     }
 
-    /// Persist the consumed-log cursor. Always dispatched onto `pumpQueue` because
-    /// callers may invoke it from a host completion handler on an arbitrary thread.
+    /// Persist the consumed-log cursor (dispatched onto pumpQueue).
     private func commitLogCursor(_ cursor: LogSyncCursor) {
         pumpQueue.async { [weak self] in
             guard let self = self else { return }
             self.state.storedLastLogNum = cursor.lastLogNum
             self.state.storedWrappingCount = cursor.wrappingCount
             self.notifyStateDidChange()
-            // log.info (not NSLog) so this lands in the exported log file for bench verification.
             self.log.info("commitLogCursor: storedLast=\(cursor.lastLogNum) storedWrap=\(cursor.wrappingCount)")
         }
     }
 
-    /// Fetch new logs since last sync from the pump.
-    ///
-    /// This intentionally does NOT advance the consumed-log cursor. It returns the
-    /// cursor the caller should commit via `commitLogCursor(_:)` *only after* the
-    /// fetched events have been durably stored by the host. If a fetch page fails,
-    /// nothing is committed and the whole range is re-fetched next cycle (safe: the
-    /// events are reported to the host at most once, after all pages succeed).
+    /// Fetch new logs since last sync. Does NOT advance the cursor — the caller
+    /// commits it via commitLogCursor(_:) after the host stores the events.
     private func fetchNewLogEntries() throws -> (entries: [DiaconnLogEntry], cursor: LogSyncCursor?) {
         let pumpLastLogNum = state.pumpLastLogNum
         let pumpWrapCount = state.pumpWrappingCount
@@ -1526,10 +1510,8 @@ extension DiaconnPumpManager: PumpManager {
         let storedLast = Int(state.storedLastLogNum)
         let storedWrap = Int(state.storedWrappingCount)
 
-        // On wrap: sync remainder of old wrap (storedLast+1~9999) then reset to new wrap baseline.
-        // End bound is 10000 (exclusive-style), matching AndroidAPS getLogLoopCount's
-        // `end = 10000`. With 9999 the last page never covers entry 9999 itself
-        // (storedLast=9998 → start=9999, end=9999 → loopSize=0), dropping that dose.
+        // On wrap: sync remainder of old wrap then reset to new wrap baseline.
+        // End bound 10000 matches AndroidAPS (9999 would drop entry 9999 itself).
         let isWrapSync = pumpWrap > storedWrap
         let startLogNum = storedLast + 1
         let endLogNum = isWrapSync ? 10000 : pumpLast
@@ -1547,14 +1529,8 @@ extension DiaconnPumpManager: PumpManager {
         guard loopSize > 0 else {
             NSLog("[DiaconnKit] BIG_LOG_INQUIRE: loopSize=0 — skipping")
             if isWrapSync {
-                // Wrap detected while the old wrap is already fully consumed
-                // (storedLast=9999 → nothing left to fetch from it). The cursor
-                // must still reset to the new wrap baseline; otherwise every
-                // future sync recomputes this same dead path (isWrapSync=true,
-                // loopSize<=0) and no log is ever fetched again — silently
-                // dropping all subsequent doses from IOB. Mirrors AndroidAPS
-                // getCloudLogLoopCount's explicit `platformPumpLogNum >= 9999`
-                // branch ("start = 0 // 처음부터 시작").
+                // Old wrap fully consumed: still reset the cursor to the new wrap
+                // baseline or this dead path repeats forever (AndroidAPS >=9999 branch).
                 log.info("BIG_LOG_INQUIRE: wrap at fully-synced boundary — resetting cursor to wrap=\(pumpWrap) logNum=0")
                 return ([], LogSyncCursor(lastLogNum: 0, wrappingCount: UInt8(pumpWrap)))
             }
@@ -1562,7 +1538,6 @@ extension DiaconnPumpManager: PumpManager {
         }
 
         var allEntries: [DiaconnLogEntry] = []
-        // Cursor to commit *after* the host durably stores the events (see commitLogCursor).
         var pendingCursor: LogSyncCursor?
 
         for i in 0 ..< loopSize {
@@ -1602,6 +1577,11 @@ extension DiaconnPumpManager: PumpManager {
     private func logEntriesToDoses(_ entries: [DiaconnLogEntry]) -> [DoseEntry] {
         entries.compactMap { entry -> DoseEntry? in
             let date = entry.date
+            guard isPlausibleEventDate(date) else {
+                let rawHex = entry.logDataBytes.map { String(format: "%02X", $0) }.joined()
+                log.error("Boundary audit: rejecting log entry with implausible date \(date) logNum=\(entry.logNum) wrap=\(entry.wrapCount) kind=\(entry.logKind) raw=\(rawHex)")
+                return nil
+            }
             switch entry.logKind {
             case .mealBolusFail,
                  .mealBolusSuccess,
@@ -1705,9 +1685,7 @@ extension DiaconnPumpManager: PumpManager {
                 }
 
                 if entries.isEmpty {
-                    // No entries fetched. A non-nil cursor here means a cursor-only
-                    // transition (wrap at the fully-synced boundary); there is nothing
-                    // for the host to store, so commit it immediately.
+                    // Cursor-only transition (e.g. wrap at boundary): nothing to store.
                     if let cursor = cursor {
                         self.commitLogCursor(cursor)
                     }
@@ -1724,9 +1702,7 @@ extension DiaconnPumpManager: PumpManager {
                         )
                     }
                     if events.isEmpty {
-                        // Entries existed but produced no reportable dose events (e.g. only
-                        // filtered alarms). The host has nothing to store, so advancing the
-                        // cursor now is safe and prevents re-fetching these forever.
+                        // No reportable events — safe to advance the cursor now.
                         if let cursor = cursor {
                             self.commitLogCursor(cursor)
                         }
@@ -1734,8 +1710,6 @@ extension DiaconnPumpManager: PumpManager {
                         let now = Date()
                         self.pumpDelegate.notify { delegate in
                             guard let delegate = delegate else {
-                                // No delegate to store events; leave the cursor un-advanced so
-                                // the next sync re-reports them.
                                 NSLog("[DiaconnKit] syncLogHistory: no delegate — cursor NOT advanced, will retry")
                                 return
                             }
@@ -1746,14 +1720,10 @@ extension DiaconnPumpManager: PumpManager {
                                 replacePendingEvents: false
                             ) { error in
                                 if let error = error {
-                                    // Host failed to persist. Do NOT advance the cursor; the same
-                                    // entries are re-fetched and re-reported on the next sync.
+                                    // Keep the cursor so the next sync re-reports these entries.
                                     self.log.error("syncLogHistory: hasNewPumpEvents error: \(error) — cursor NOT advanced, will retry")
                                 } else {
-                                    // Host durably stored the events. Only now is it safe to advance
-                                    // the consumed-log cursor. This is the fix that prevents a crash
-                                    // during host persistence from permanently dropping doses (which
-                                    // collapsed IOB and caused insulin stacking).
+                                    // Host stored the events — now safe to advance the cursor.
                                     NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents stored OK")
                                     if let cursor = cursor {
                                         self.commitLogCursor(cursor)
@@ -1950,10 +1920,23 @@ extension DiaconnPumpManager: PumpManager {
         return (start, end, size)
     }
 
+    /// Boundary audit: reject implausible dose dates before they reach the host.
+    /// A wildly-off date poisons the host dose store and crash-loops LoopKit (2026-07-04).
+    private func isPlausibleEventDate(_ date: Date) -> Bool {
+        let now = Date()
+        return date.timeIntervalSince(now) < 24 * 60 * 60
+            && date.timeIntervalSince(now) > -365 * 24 * 60 * 60
+    }
+
     /// Convert DiaconnLogEntry array to LoopKit NewPumpEvent array
     private func logEntriesToPumpEvents(_ entries: [DiaconnLogEntry]) -> [NewPumpEvent] {
         entries.compactMap { entry -> NewPumpEvent? in
             let date = entry.date
+            guard isPlausibleEventDate(date) else {
+                let rawHex = entry.logDataBytes.map { String(format: "%02X", $0) }.joined()
+                log.error("Boundary audit: rejecting log entry with implausible date \(date) logNum=\(entry.logNum) wrap=\(entry.wrapCount) kind=\(entry.logKind) raw=\(rawHex)")
+                return nil
+            }
             var rawBytes = Data()
             rawBytes.append(entry.wrapCount)
             rawBytes.appendShortLE(entry.logNum)
@@ -2069,14 +2052,8 @@ extension DiaconnPumpManager: PumpManager {
 extension DiaconnPumpManager {
     func notifyBolusDone(deliveredUnits: Double) {
         guard state.bolusState != .noBolus else {
-            // Result report for a bolus this app never commanded. The pump's
-            // report indications are fan-out delivered by iOS to every app
-            // subscribed to the same pump, so with a second looping app (or the
-            // pump's own buttons) driving deliveries, foreign bolus results
-            // arrive here. Don't adopt them into our state — especially
-            // lastBolusAmount/lastBolusDate, which feed the in-progress endDate
-            // projection. The dose itself is still ingested authoritatively via
-            // the history sync.
+            // Foreign bolus (another app or pump UI on the shared BLE link):
+            // don't adopt its result into our state; history sync ingests the dose.
             log.info("notifyBolusDone: no bolus commanded by this app — ignoring foreign bolus result (delivered=\(deliveredUnits)U), syncing history only")
             syncLogHistory()
             return
@@ -2094,10 +2071,7 @@ extension DiaconnPumpManager {
 
     func notifyBolusDidUpdate(deliveredUnits: Double, setAmount: Double? = nil) {
         guard state.bolusState != .noBolus else {
-            // Progress report for a bolus this app never commanded (see
-            // notifyBolusDone). Adopting it would resurrect a stale
-            // lastBolusDate into the endDate projection and show another
-            // controller's bolus as ours.
+            // Foreign bolus progress — ignore (see notifyBolusDone).
             log.info("notifyBolusDidUpdate: no bolus commanded by this app — ignoring foreign bolus progress (delivered=\(deliveredUnits)U)")
             return
         }
