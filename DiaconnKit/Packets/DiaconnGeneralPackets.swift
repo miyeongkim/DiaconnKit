@@ -268,8 +268,11 @@ func parseBigAPSMainInfoResponse(_ data: Data) -> DiaconnPumpStatus? {
     status.maxBolusPerDay = Double(readShort()) / 100.0
 
     // Sound
-    status.beepAndAlarm = readByte() - 1
-    status.alarmIntensity = readByte() - 1
+    // Values are 1-based on the wire, but 0 has been observed in the field
+    // (2026-06-23 crash: Swift arithmetic overflow at this line — UInt8 0-1
+    // traps, killing the app mid pump-status parse). Clamp instead of trapping.
+    status.beepAndAlarm = max(readByte(), 1) - 1
+    status.alarmIntensity = max(readByte(), 1) - 1
 
     // LCD
     status.lcdOnTimeSec = readByte()
