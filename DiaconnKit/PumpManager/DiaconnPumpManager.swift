@@ -136,7 +136,17 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
             } else {
                 projectedEnd = startDate.addingTimeInterval(estimatedDuration(toBolus: totalUnits))
             }
-            let endDate = max(projectedEnd, Date().addingTimeInterval(5))
+            // Physical ceiling: no Diaconn bolus takes anywhere near 30 minutes
+            // (max 30U finishes in a few minutes). Unbounded extrapolation can
+            // produce year-scale endDates when the inputs are poisoned — e.g. a
+            // foreign bolus's progress reports arriving over the shared BLE link
+            // while lastBolusDate still points at this app's own bolus from days
+            // ago. Clamp so a bad projection degrades to an early-closing
+            // progress row instead of an absurd future-dated dose.
+            let endDate = min(
+                max(projectedEnd, Date().addingTimeInterval(5)),
+                Date().addingTimeInterval(30 * 60)
+            )
             let dose = DoseEntry(
                 type: .bolus,
                 startDate: startDate,
@@ -2058,6 +2068,19 @@ extension DiaconnPumpManager: PumpManager {
 
 extension DiaconnPumpManager {
     func notifyBolusDone(deliveredUnits: Double) {
+        guard state.bolusState != .noBolus else {
+            // Result report for a bolus this app never commanded. The pump's
+            // report indications are fan-out delivered by iOS to every app
+            // subscribed to the same pump, so with a second looping app (or the
+            // pump's own buttons) driving deliveries, foreign bolus results
+            // arrive here. Don't adopt them into our state — especially
+            // lastBolusAmount/lastBolusDate, which feed the in-progress endDate
+            // projection. The dose itself is still ingested authoritatively via
+            // the history sync.
+            log.info("notifyBolusDone: no bolus commanded by this app — ignoring foreign bolus result (delivered=\(deliveredUnits)U), syncing history only")
+            syncLogHistory()
+            return
+        }
         state.bolusState = .noBolus
         state.lastBolusAmount = deliveredUnits
         state.lastBolusDate = Date()
@@ -2070,6 +2093,14 @@ extension DiaconnPumpManager {
     }
 
     func notifyBolusDidUpdate(deliveredUnits: Double, setAmount: Double? = nil) {
+        guard state.bolusState != .noBolus else {
+            // Progress report for a bolus this app never commanded (see
+            // notifyBolusDone). Adopting it would resurrect a stale
+            // lastBolusDate into the endDate projection and show another
+            // controller's bolus as ours.
+            log.info("notifyBolusDidUpdate: no bolus commanded by this app — ignoring foreign bolus progress (delivered=\(deliveredUnits)U)")
+            return
+        }
         if let setAmount = setAmount, setAmount > 0 {
             state.totalUnits = setAmount
             doseReporter?.totalUnits = setAmount
