@@ -130,7 +130,7 @@ public struct DiaconnPumpStatus {
     public var serialNumber: String {
         let countryChar = Character(UnicodeScalar(country))
         let typeChar = Character(UnicodeScalar(productType))
-        return "\(countryChar)-\(typeChar)-\(makeYear)-\(String(format: "%02d", makeMonth))-\(String(format: "%02d", makeDay))-\(String(format: "%03d", lotNo))-\(serialNo)"
+        return "\(countryChar)-\(typeChar)-\(String(format: "%02d", makeYear))-\(String(format: "%02d", makeMonth))-\(String(format: "%02d", makeDay))-\(String(format: "%03d", lotNo))-\(String(format: "%05d", serialNo))"
     }
 }
 
@@ -383,7 +383,7 @@ struct SerialNumInquireResponse {
     var serialNumber: String {
         let c = Character(UnicodeScalar(country))
         let t = Character(UnicodeScalar(productType))
-        return "\(c)\(t)\(makeYear)\(makeMonth)\(makeDay)\(lotNo)\(serialNo)"
+        return "\(c)\(t)\(String(format: "%02d", makeYear))\(String(format: "%02d", makeMonth))\(String(format: "%02d", makeDay))\(String(format: "%03d", lotNo))\(String(format: "%05d", serialNo))"
     }
 
     var firmwareVersion: String {
