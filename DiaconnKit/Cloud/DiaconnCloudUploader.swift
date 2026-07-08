@@ -25,8 +25,12 @@ class DiaconnCloudUploader {
 
         let (data, _) = try await session.data(for: request)
         let response = try JSONDecoder().decode(DiaconnLastNoResponse.self, from: data)
-        guard response.ok else { return -1 }
-        return response.info?.pumplog_no ?? -1
+        // A failed inquiry must not be read as "-1 = no logs on server" —
+        // that answer triggers a full re-upload of the entire history.
+        guard response.ok, let lastNo = response.info?.pumplog_no else {
+            throw URLError(.badServerResponse)
+        }
+        return lastNo
     }
 
     func uploadPumpLogs(dto: DiaconnPumpLogDto) async throws -> Bool {

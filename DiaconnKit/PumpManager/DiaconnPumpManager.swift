@@ -32,6 +32,9 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
     let stateObservers = WeakSynchronizedSet<DiaconnStateObserver>()
 
     private var doseReporter: DiaconnDoseProgressReporter?
+
+    /// Server last-no at the last successful cloud upload — detects a stuck cursor.
+    private var lastCloudUploadPlatformNo: Int64 = .min
     public internal(set) var activeAlert: DiaconnPumpManagerAlert?
 
     private let log = DiaconnLogger(category: "DiaconnPumpManager")
@@ -1773,9 +1776,7 @@ extension DiaconnPumpManager: PumpManager {
                 pumpVersion: pumpVersion,
                 incarnationNum: incarnationNum
             )
-            NSLog(
-                "[DiaconnKit] syncCloudLogHistory: platformLastNo=\(platformLastNo) pumpLast=\(pumpLastNum) pumpWrap=\(pumpWrappingCount)"
-            )
+            log.info("syncCloudLogHistory: platformLastNo=\(platformLastNo) pumpLast=\(pumpLastNum) pumpWrap=\(pumpWrappingCount)")
 
             let platformWrappingCount = platformLastNo < 0 ? 0 : Int(platformLastNo / 10000)
             let platformLogNo = platformLastNo == -1 ? 9999 : Int(platformLastNo % 10000)
@@ -1798,7 +1799,14 @@ extension DiaconnPumpManager: PumpManager {
                 return
             }
 
-            NSLog("[DiaconnKit] syncCloudLogHistory: uploading \(loopSize) pages start=\(start) end=\(end)")
+            // Brake: the last upload succeeded but the server's answer didn't move —
+            // stop instead of re-uploading the same range forever.
+            if platformLastNo == lastCloudUploadPlatformNo {
+                log.error("syncCloudLogHistory: server last-no stuck at \(platformLastNo) — halting re-upload of \(start)~\(end)")
+                return
+            }
+
+            log.info("syncCloudLogHistory: uploading \(loopSize) pages start=\(start) end=\(end)")
 
             state.isCloudSyncing = true
             state.cloudSyncCurrentPage = 0
@@ -1808,6 +1816,7 @@ extension DiaconnPumpManager: PumpManager {
             let appUid = await MainActor.run { UIDevice.current.identifierForVendor?.uuidString ?? "" }
             let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0"
             let pageSize = 11
+            var uploadedAnyPage = false
 
             for i in 0 ..< loopSize {
                 guard !Task.isCancelled else {
@@ -1843,7 +1852,11 @@ extension DiaconnPumpManager: PumpManager {
                 NSLog(
                     "[DiaconnKit] syncCloudLogHistory: page \(i + 1)/\(loopSize) (\(pageStart)~\(pageEnd), \(entries.count) entries) ok=\(success)"
                 )
-                if !success { break }
+                if !success {
+                    log.error("syncCloudLogHistory: upload rejected at page \(i + 1)/\(loopSize) (\(pageStart)~\(pageEnd))")
+                    break
+                }
+                uploadedAnyPage = true
 
                 if let lastEntry = entries.last {
                     state.cloudLastLogNum = Int(lastEntry.logNum)
@@ -1856,10 +1869,14 @@ extension DiaconnPumpManager: PumpManager {
                 }
             }
 
+            if uploadedAnyPage {
+                lastCloudUploadPlatformNo = platformLastNo
+            }
+            log.info("syncCloudLogHistory: finished \(state.cloudSyncCurrentPage)/\(loopSize) pages")
             state.isCloudSyncing = false
             notifyStateDidChange()
         } catch {
-            NSLog("[DiaconnKit] syncCloudLogHistory error: \(error)")
+            log.error("syncCloudLogHistory error: \(error)")
             state.isCloudSyncing = false
             notifyStateDidChange()
         }
