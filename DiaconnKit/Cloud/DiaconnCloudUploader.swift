@@ -11,7 +11,7 @@ class DiaconnCloudUploader {
     }
 
     func getPumpLastNo(pumpUid: String, pumpVersion: String, incarnationNum: Int) async throws -> Int64 {
-        guard var components = URLComponents(string: Self.baseURL + "v1/pumplog/last_no") else {
+        guard var components = URLComponents(string: Self.baseURL + "v1/pumplog/loopkit_last_no") else {
             throw URLError(.badURL)
         }
         components.queryItems = [
@@ -34,7 +34,7 @@ class DiaconnCloudUploader {
     }
 
     func uploadPumpLogs(dto: DiaconnPumpLogDto) async throws -> Bool {
-        guard let url = URL(string: Self.baseURL + "v1/pumplog/save") else { throw URLError(.badURL) }
+        guard let url = URL(string: Self.baseURL + "v1/pumplog/loopkit_save") else { throw URLError(.badURL) }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
