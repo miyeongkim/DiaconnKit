@@ -1220,7 +1220,10 @@ extension DiaconnPumpManager: PumpManager {
                 } else {
                     let result = DiaconnPacketType.SettingResult(rawValue: Int(activateResp.result))
                     if result == .basalSettingRequired {
-                        self.log.info("syncBasalRateSchedule: 0x0C returned basalSettingRequired — pattern already active, skipping activation OTP")
+                        self.log
+                            .info(
+                                "syncBasalRateSchedule: 0x0C returned basalSettingRequired — pattern already active, skipping activation OTP"
+                            )
                     } else {
                         throw DiaconnPumpManagerError.settingFailed(result ?? .protocolError)
                     }
@@ -1582,7 +1585,10 @@ extension DiaconnPumpManager: PumpManager {
             let date = entry.date
             guard isPlausibleEventDate(date) else {
                 let rawHex = entry.logDataBytes.map { String(format: "%02X", $0) }.joined()
-                log.error("Boundary audit: rejecting log entry with implausible date \(date) logNum=\(entry.logNum) wrap=\(entry.wrapCount) kind=\(entry.logKind) raw=\(rawHex)")
+                log
+                    .error(
+                        "Boundary audit: rejecting log entry with implausible date \(date) logNum=\(entry.logNum) wrap=\(entry.wrapCount) kind=\(entry.logKind) raw=\(rawHex)"
+                    )
                 return nil
             }
             switch entry.logKind {
@@ -1724,7 +1730,10 @@ extension DiaconnPumpManager: PumpManager {
                             ) { error in
                                 if let error = error {
                                     // Keep the cursor so the next sync re-reports these entries.
-                                    self.log.error("syncLogHistory: hasNewPumpEvents error: \(error) — cursor NOT advanced, will retry")
+                                    self.log
+                                        .error(
+                                            "syncLogHistory: hasNewPumpEvents error: \(error) — cursor NOT advanced, will retry"
+                                        )
                                 } else {
                                     // Host stored the events — now safe to advance the cursor.
                                     NSLog("[DiaconnKit] syncLogHistory: hasNewPumpEvents stored OK")
@@ -1741,7 +1750,13 @@ extension DiaconnPumpManager: PumpManager {
             }
 
             if self.state.cloudLogSyncEnabled {
-                self.cloudSyncTask = Task { [weak self] in await self?.syncCloudLogHistory() }
+                // Serialize cycles: two overlapping tasks would both read the same
+                // server last-no and upload the same range twice.
+                let previousSync = self.cloudSyncTask
+                self.cloudSyncTask = Task { [weak self] in
+                    await previousSync?.value
+                    await self?.syncCloudLogHistory()
+                }
             }
         }
     }
@@ -1766,6 +1781,14 @@ extension DiaconnPumpManager: PumpManager {
             return
         }
 
+        // Claim the flag before the first await — a second task entering during
+        // the last-no inquiry would otherwise upload the same range twice.
+        state.isCloudSyncing = true
+        defer {
+            state.isCloudSyncing = false
+            notifyStateDidChange()
+        }
+
         let incarnationNum = Int(state.syncedIncarnation)
         let pumpLastNum = Int(state.pumpLastLogNum)
         let pumpWrappingCount = Int(state.pumpWrappingCount)
@@ -1776,7 +1799,10 @@ extension DiaconnPumpManager: PumpManager {
                 pumpVersion: pumpVersion,
                 incarnationNum: incarnationNum
             )
-            log.info("syncCloudLogHistory: platformLastNo=\(platformLastNo) pumpLast=\(pumpLastNum) pumpWrap=\(pumpWrappingCount)")
+            log
+                .info(
+                    "syncCloudLogHistory: platformLastNo=\(platformLastNo) pumpLast=\(pumpLastNum) pumpWrap=\(pumpWrappingCount)"
+                )
 
             let platformWrappingCount = platformLastNo < 0 ? 0 : Int(platformLastNo / 10000)
             let platformLogNo = platformLastNo == -1 ? 9999 : Int(platformLastNo % 10000)
@@ -1808,7 +1834,6 @@ extension DiaconnPumpManager: PumpManager {
 
             log.info("syncCloudLogHistory: uploading \(loopSize) pages start=\(start) end=\(end)")
 
-            state.isCloudSyncing = true
             state.cloudSyncCurrentPage = 0
             state.cloudSyncTotalPages = loopSize
             notifyStateDidChange()
@@ -1873,12 +1898,8 @@ extension DiaconnPumpManager: PumpManager {
                 lastCloudUploadPlatformNo = platformLastNo
             }
             log.info("syncCloudLogHistory: finished \(state.cloudSyncCurrentPage)/\(loopSize) pages")
-            state.isCloudSyncing = false
-            notifyStateDidChange()
         } catch {
             log.error("syncCloudLogHistory error: \(error)")
-            state.isCloudSyncing = false
-            notifyStateDidChange()
         }
     }
 
@@ -1951,7 +1972,10 @@ extension DiaconnPumpManager: PumpManager {
             let date = entry.date
             guard isPlausibleEventDate(date) else {
                 let rawHex = entry.logDataBytes.map { String(format: "%02X", $0) }.joined()
-                log.error("Boundary audit: rejecting log entry with implausible date \(date) logNum=\(entry.logNum) wrap=\(entry.wrapCount) kind=\(entry.logKind) raw=\(rawHex)")
+                log
+                    .error(
+                        "Boundary audit: rejecting log entry with implausible date \(date) logNum=\(entry.logNum) wrap=\(entry.wrapCount) kind=\(entry.logKind) raw=\(rawHex)"
+                    )
                 return nil
             }
             var rawBytes = Data()
@@ -2071,7 +2095,10 @@ extension DiaconnPumpManager {
         guard state.bolusState != .noBolus else {
             // Foreign bolus (another app or pump UI on the shared BLE link):
             // don't adopt its result into our state; history sync ingests the dose.
-            log.info("notifyBolusDone: no bolus commanded by this app — ignoring foreign bolus result (delivered=\(deliveredUnits)U), syncing history only")
+            log
+                .info(
+                    "notifyBolusDone: no bolus commanded by this app — ignoring foreign bolus result (delivered=\(deliveredUnits)U), syncing history only"
+                )
             syncLogHistory()
             return
         }
@@ -2089,7 +2116,10 @@ extension DiaconnPumpManager {
     func notifyBolusDidUpdate(deliveredUnits: Double, setAmount: Double? = nil) {
         guard state.bolusState != .noBolus else {
             // Foreign bolus progress — ignore (see notifyBolusDone).
-            log.info("notifyBolusDidUpdate: no bolus commanded by this app — ignoring foreign bolus progress (delivered=\(deliveredUnits)U)")
+            log
+                .info(
+                    "notifyBolusDidUpdate: no bolus commanded by this app — ignoring foreign bolus progress (delivered=\(deliveredUnits)U)"
+                )
             return
         }
         if let setAmount = setAmount, setAmount > 0 {
