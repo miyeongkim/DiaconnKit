@@ -564,7 +564,11 @@ extension DiaconnPumpManager: PumpManager {
     }
 
     public static var onboardingSupportedBasalRates: [Double] {
-        stride(from: 0.01, through: 16.0, by: 0.01).map { $0 }
+        // Onboarding runs before pairing, so the pump's configured basal limit is unknown.
+        // Use the factory default of 3U/h; after pairing, `supportedBasalRates` follows the
+        // pump's setting (up to 6U/h). Temp basal (up to 250%) is not a scheduled rate.
+        // Scheduled rates go down to 0.01U/h in 0.01U/h steps.
+        (1 ... 300).map { Double($0) / 100.0 }
     }
 
     public static var onboardingSupportedBolusVolumes: [Double] {
