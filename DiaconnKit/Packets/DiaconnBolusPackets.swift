@@ -6,7 +6,7 @@ import Foundation
 /// - Parameter amount: insulin units (e.g. 2.5U → short value 250)
 func generateBolusPacket(amount: Double) -> Data {
     var payload = Data()
-    payload.appendShortLE(UInt16(amount * 100))
+    payload.appendShortLE(UInt16((amount * 100).rounded()))
     return DiaconnPacketEncoder.encode(
         msgType: DiaconnPacketType.INJECTION_SNACK_SETTING,
         payload: payload
@@ -41,7 +41,7 @@ func parseBolusSettingResponse(_ data: Data) -> BolusSettingResponse? {
 func generateExtendedBolusPacket(amount: Double, durationMinutes: UInt16) -> Data {
     var payload = Data()
     payload.appendShortLE(durationMinutes)
-    payload.appendShortLE(UInt16(amount * 100))
+    payload.appendShortLE(UInt16((amount * 100).rounded()))
     payload.appendIntLE(UInt32(946_652_400)) // Reference time (2000-01-01)
     return DiaconnPacketEncoder.encode(
         msgType: DiaconnPacketType.INJECTION_EXTENDED_BOLUS_SETTING,
