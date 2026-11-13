@@ -36,7 +36,7 @@ func generateTempBasalPercentPacket(percent: Int, durationMinutes: Int) -> Data 
 ///   - status: 1=new setting, 3=stealth change (seamless change while temp basal is already running)
 func generateTempBasalAbsolutePacket(unitsPerHour: Double, durationMinutes: Int, status: UInt8 = 1) -> Data {
     let timeCode = UInt8(durationMinutes / 15)
-    let rateRatio = UInt16(1000 + Int(unitsPerHour * 100)) // 1000=0.00U, 1600=6.00U
+    let rateRatio = UInt16(1000 + Int((unitsPerHour * 100).rounded())) // 1000=0.00U, 1600=6.00U
     return generateTempBasalPacket(status: status, time: timeCode, injectRateRatio: rateRatio)
 }
 
@@ -121,7 +121,7 @@ func generateBasalSettingPacket(pattern: UInt8, group: UInt8, amounts: [Double],
 
     for i in 0 ..< 6 {
         let amount = i < amounts.count ? amounts[i] : 0.0
-        payload.appendShortLE(UInt16(amount * 100))
+        payload.appendShortLE(UInt16((amount * 100).rounded()))
     }
 
     let msgConEnd = isLastGroup ? DiaconnPacketType.MSG_CON_END : DiaconnPacketType.MSG_CON_CONTINUE

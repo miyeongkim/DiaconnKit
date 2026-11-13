@@ -769,7 +769,7 @@ extension DiaconnPumpManager: PumpManager {
             do {
                 // Send bolus command (0x07) + wait for response (receive OTP number)
                 var payload = Data()
-                payload.appendShortLE(UInt16(units * 100))
+                payload.appendShortLE(UInt16((units * 100).rounded()))
                 guard let responseData = try self.bluetooth.sendPacket(
                     msgType: DiaconnPacketType.INJECTION_SNACK_SETTING,
                     payload: payload
