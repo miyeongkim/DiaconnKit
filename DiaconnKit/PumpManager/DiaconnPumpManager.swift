@@ -20,11 +20,19 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
         state.rawValue
     }
 
-    public static let pluginIdentifier: String = "DiaconnG8"
+    public let pluginIdentifier: String = "DiaconnG8"
     public let managerIdentifier: String = "DiaconnG8"
 
     public var localizedTitle: String {
         state.getFriendlyDeviceName()
+    }
+
+    public var inSignalLoss: Bool {
+        Date.now.timeIntervalSince(state.lastStatusDate) > 12 * 60
+    }
+
+    public var isInoperable: Bool {
+        false
     }
 
     public let pumpDelegate = WeakSynchronizedDelegate<PumpManagerDelegate>()
@@ -151,6 +159,7 @@ public class DiaconnPumpManager: DeviceManager, AlertResponder, AlertSoundVendor
                 endDate: endDate,
                 value: totalUnits,
                 unit: .units,
+                decisionId: nil,
                 deliveredUnits: state.deliveredUnits,
                 description: "Bolus in progress",
                 syncIdentifier: "diaconn-bolus-\(startDate.timeIntervalSinceReferenceDate)",
@@ -598,11 +607,11 @@ extension DiaconnPumpManager: PumpManager {
 
     public var deliveryLimits: DeliveryLimits {
         DeliveryLimits(
-            maximumBasalRate: HKQuantity(
-                unit: HKUnit.internationalUnit().unitDivided(by: .hour()),
+            maximumBasalRate: LoopQuantity(
+                unit: .internationalUnitsPerHour,
                 doubleValue: state.maxBasalPerHour
             ),
-            maximumBolus: HKQuantity(unit: .internationalUnit(), doubleValue: state.maxBolus)
+            maximumBolus: LoopQuantity(unit: .internationalUnit, doubleValue: state.maxBolus)
         )
     }
 
@@ -724,6 +733,7 @@ extension DiaconnPumpManager: PumpManager {
     }
 
     public func enactBolus(
+        decisionId _: UUID?,
         units: Double,
         activationType: BolusActivationType,
         completion: @escaping (PumpManagerError?) -> Void
@@ -865,6 +875,7 @@ extension DiaconnPumpManager: PumpManager {
     }
 
     public func enactTempBasal(
+        decisionId _: UUID?,
         unitsPerHour: Double,
         for duration: TimeInterval,
         completion: @escaping (PumpManagerError?) -> Void
@@ -1606,7 +1617,8 @@ extension DiaconnPumpManager: PumpManager {
                     startDate: date,
                     endDate: date,
                     value: entry.injectAmount,
-                    unit: .units
+                    unit: .units,
+                    decisionId: nil
                 )
             case .squareBolusFail,
                  .squareBolusSuccess:
@@ -1617,11 +1629,19 @@ extension DiaconnPumpManager: PumpManager {
                     startDate: date,
                     endDate: date.addingTimeInterval(sqDur),
                     value: entry.injectAmount,
-                    unit: .units
+                    unit: .units,
+                    decisionId: nil
                 )
             case .dualNormal:
                 guard entry.injectAmount > 0 else { return nil }
-                return DoseEntry(type: .bolus, startDate: date, endDate: date, value: entry.injectAmount, unit: .units)
+                return DoseEntry(
+                    type: .bolus,
+                    startDate: date,
+                    endDate: date,
+                    value: entry.injectAmount,
+                    unit: .units,
+                    decisionId: nil
+                )
             case .dualBolusFail,
                  .dualBolusSuccess:
                 guard entry.injectAmount > 0 else { return nil }
@@ -1631,7 +1651,8 @@ extension DiaconnPumpManager: PumpManager {
                     startDate: date,
                     endDate: date.addingTimeInterval(dualSqDur),
                     value: entry.injectAmount,
-                    unit: .units
+                    unit: .units,
+                    decisionId: nil
                 )
             case .tbStart:
                 let duration = TimeInterval(entry.tbTime * 15 * 60)
@@ -1641,12 +1662,13 @@ extension DiaconnPumpManager: PumpManager {
                     startDate: date,
                     endDate: date.addingTimeInterval(duration),
                     value: rate,
-                    unit: .unitsPerHour
+                    unit: .unitsPerHour,
+                    decisionId: nil
                 )
             case .suspend:
-                return DoseEntry(type: .suspend, startDate: date, value: 0, unit: .unitsPerHour)
+                return DoseEntry(type: .suspend, startDate: date, value: 0, unit: .unitsPerHour, decisionId: nil)
             case .suspendRelease:
-                return DoseEntry(type: .resume, startDate: date, value: 0, unit: .unitsPerHour)
+                return DoseEntry(type: .resume, startDate: date, value: 0, unit: .unitsPerHour, decisionId: nil)
             default:
                 return nil
             }
@@ -1997,6 +2019,7 @@ extension DiaconnPumpManager: PumpManager {
                     endDate: date,
                     value: entry.injectAmount,
                     unit: .units,
+                    decisionId: nil,
                     automatic: false
                 )
                 return NewPumpEvent(date: date, dose: mealDose, raw: rawBytes, title: "Bolus")
@@ -2010,6 +2033,7 @@ extension DiaconnPumpManager: PumpManager {
                     endDate: date,
                     value: entry.injectAmount,
                     unit: .units,
+                    decisionId: nil,
                     automatic: isAutomatic
                 )
                 return NewPumpEvent(date: date, dose: normalDose, raw: rawBytes, title: isAutomatic ? "SMB" : "Bolus")
@@ -2024,6 +2048,7 @@ extension DiaconnPumpManager: PumpManager {
                     endDate: date.addingTimeInterval(sqDuration),
                     value: entry.injectAmount,
                     unit: .units,
+                    decisionId: nil,
                     automatic: false
                 )
                 return NewPumpEvent(date: date, dose: sqDose, raw: rawBytes, title: "Extended Bolus")
@@ -2036,6 +2061,7 @@ extension DiaconnPumpManager: PumpManager {
                     endDate: date,
                     value: entry.injectAmount,
                     unit: .units,
+                    decisionId: nil,
                     automatic: false
                 )
                 return NewPumpEvent(date: date, dose: dualNormDose, raw: rawBytes, title: "Dual Bolus")
@@ -2050,6 +2076,7 @@ extension DiaconnPumpManager: PumpManager {
                     endDate: date.addingTimeInterval(dualSqDuration),
                     value: entry.injectAmount,
                     unit: .units,
+                    decisionId: nil,
                     automatic: false
                 )
                 return NewPumpEvent(date: date, dose: dualSqDose, raw: rawBytes, title: "Dual Extended Bolus")
@@ -2062,14 +2089,15 @@ extension DiaconnPumpManager: PumpManager {
                     endDate: date.addingTimeInterval(duration),
                     value: rate,
                     unit: .unitsPerHour,
+                    decisionId: nil,
                     automatic: true
                 )
                 return NewPumpEvent(date: date, dose: dose, raw: rawBytes, title: "Temp Basal")
             case .suspend:
-                let dose = DoseEntry(type: .suspend, startDate: date, value: 0, unit: .unitsPerHour)
+                let dose = DoseEntry(type: .suspend, startDate: date, value: 0, unit: .unitsPerHour, decisionId: nil)
                 return NewPumpEvent(date: date, dose: dose, raw: rawBytes, title: "Suspend")
             case .suspendRelease:
-                let dose = DoseEntry(type: .resume, startDate: date, value: 0, unit: .unitsPerHour)
+                let dose = DoseEntry(type: .resume, startDate: date, value: 0, unit: .unitsPerHour, decisionId: nil)
                 return NewPumpEvent(date: date, dose: dose, raw: rawBytes, title: "Resume")
             case .changeInjector:
                 return NewPumpEvent(date: date, dose: nil, raw: rawBytes, title: "Insulin Change", type: .rewind)
@@ -2187,7 +2215,9 @@ extension DiaconnPumpManager {
                 return
             }
 
-            delegate.issueAlert(loopAlert)
+            Task {
+                await delegate.issueAlert(loopAlert)
+            }
             delegate.pumpManager(
                 self,
                 hasNewPumpEvents: events,
@@ -2205,27 +2235,19 @@ extension DiaconnPumpManager {
 // MARK: - Deactivation
 
 public extension DiaconnPumpManager {
-    func notifyDelegateOfDeactivation(completion: @escaping () -> Void) {
+    func delete() async {
         bluetooth.disconnect()
-        pumpDelegate.notify { delegate in
-            guard let delegate = delegate else {
-                completion()
-                return
-            }
-            delegate.pumpManagerWillDeactivate(self)
-            completion()
-        }
+        await pumpDelegate.delegate?.pumpManagerWantsDeletion(self)
     }
 }
 
 // MARK: - AlertResponder
 
 public extension DiaconnPumpManager {
-    func acknowledgeAlert(alertIdentifier: Alert.AlertIdentifier, completion: @escaping (Error?) -> Void) {
+    func acknowledgeAlert(alertIdentifier: Alert.AlertIdentifier) async throws {
         log.info("Acknowledging alert: \(alertIdentifier)")
         // Don't clear activeAlert here — Trio auto-acks immediately.
         // activeAlert is cleared by user action via dismissActiveAlert().
-        completion(nil)
     }
 
     /// Called by user tapping Acknowledge in settings UI
@@ -2233,8 +2255,8 @@ public extension DiaconnPumpManager {
         guard let alert = activeAlert else { return }
         log.info("dismissActiveAlert: clearing \(alert.identifier)")
         let identifier = Alert.Identifier(managerIdentifier: managerIdentifier, alertIdentifier: alert.identifier)
-        pumpDelegate.notify { delegate in
-            delegate?.retractAlert(identifier: identifier)
+        Task {
+            await pumpDelegate.delegate?.retractAlert(identifier: identifier)
         }
         activeAlert = nil
         // activeAlert is not part of DiaconnPumpManagerState, so notifyStateDidChange() would

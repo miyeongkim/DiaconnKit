@@ -70,7 +70,7 @@ extension DiaconnPumpManager: PumpManagerUI {
         UIImage(named: "diacong8", in: Bundle(for: DiaconnSettingsViewModel.self), compatibleWith: nil)
     }
 
-    public var pumpStatusHighlight: DeviceStatusHighlight? {
+    public var pumpStatusHighlight: PumpStatusHighlight? {
         buildPumpStatusHighlight(for: state)
     }
 

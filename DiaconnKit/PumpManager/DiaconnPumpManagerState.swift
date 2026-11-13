@@ -157,7 +157,8 @@ public struct DiaconnPumpManagerState: RawRepresentable, Equatable {
                     startDate: tbStartDate,
                     endDate: tbEndDate,
                     value: tempBasalUnits ?? 0,
-                    unit: .unitsPerHour
+                    unit: .unitsPerHour,
+                    decisionId: nil
                 )
             )
         }

@@ -135,7 +135,8 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
                 "Resuming",
                 comment: "Title text for button when insulin delivery is in the process of being resumed"
             )
-        case .none:
+        case .none,
+             .pumpInoperable:
             return LocalizedString("Suspend Delivery", comment: "Title text for button to suspend insulin delivery")
         }
     }
@@ -233,7 +234,7 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
 
     func stopTempBasal() {
         isStoppingTempBasal = true
-        pumpManager?.enactTempBasal(unitsPerHour: 0, for: 0) { [weak self] _ in
+        pumpManager?.enactTempBasal(decisionId: nil, unitsPerHour: 0, for: 0) { [weak self] _ in
             DispatchQueue.main.async {
                 self?.isStoppingTempBasal = false
                 self?.updateFromState()
@@ -321,8 +322,9 @@ class DiaconnSettingsViewModel: ObservableObject, DiaconnStateObserver {
     }
 
     func deletePump() {
-        pumpManager?.notifyDelegateOfDeactivation {
-            DispatchQueue.main.async { self.onFinish() }
+        Task { @MainActor in
+            await pumpManager?.delete()
+            self.onFinish()
         }
     }
 }

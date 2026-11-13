@@ -12,7 +12,7 @@ private extension Comparable {
 
 class DiaconnHUDProvider: HUDProvider {
     var managerIdentifier: String {
-        DiaconnPumpManager.pluginIdentifier
+        DiaconnPumpManager.managerIdentifier
     }
 
     private var state: DiaconnPumpManagerState {
